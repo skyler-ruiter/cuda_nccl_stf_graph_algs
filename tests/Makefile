@@ -11,17 +11,17 @@ LD_FLAGS = -L$(CUDA_HOME)/lib64 -L$(NCCL_HOME)/lib -lnccl -ldl -lcudart -lcuda
 
 # Original targets
 mpi_nccl_testing: Makefile mpi_nccl_testing.cpp stf_testing.o
-    $(MPICXX) $(MPICXX_FLAGS) mpi_nccl_testing.cpp stf_testing.o $(LD_FLAGS) -o mpi_nccl_testing
+  $(MPICXX) $(MPICXX_FLAGS) mpi_nccl_testing.cpp stf_testing.o $(LD_FLAGS) -o mpi_nccl_testing
 
 stf_testing.o: Makefile stf_testing.cu
-    $(NVCC) $(NVCC_FLAGS) stf_testing.cu -c
+  $(NVCC) $(NVCC_FLAGS) stf_testing.cu -c
 
 # New target for the STF+MPI+NCCL combined implementation
 mpi_nccl_stf_test: Makefile mpi_nccl_stf_test.cpp
-    $(NVCC) $(NVCC_FLAGS) $(MPICXX_FLAGS) mpi_nccl_stf_test.cpp $(LD_FLAGS) -o mpi_nccl_stf_test
+  $(NVCC) $(NVCC_FLAGS) $(MPICXX_FLAGS) mpi_nccl_stf_test.cpp $(LD_FLAGS) -o mpi_nccl_stf_test
 
 run: mpi_nccl_stf_test
-    $(MPIRUN) -np $(NP) ./mpi_nccl_stf_test
+  $(MPIRUN) -np $(NP) ./mpi_nccl_stf_test
 
 clean:
-    rm -f mpi_nccl_testing mpi_nccl_stf_test *.o
+  rm -f mpi_nccl_testing mpi_nccl_stf_test *.o
