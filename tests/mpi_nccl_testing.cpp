@@ -1,7 +1,9 @@
 #include <cuda_runtime.h>
 #include <mpi.h>
 #include <nccl.h>
-
+#include <vector>
+#include <iostream>
+#include <string>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -52,7 +54,7 @@ int main(int argc, char* argv[]) {
   // Allocate and initialize local data using CuSTF
   const int N = 16;
   float h_senddata[N];
-  float h_recvdata[N * world_size];
+  std::vector<float> h_recvdata(N * world_size);
 
   // Initialize data
   for (int i = 0; i < N; i++) {
@@ -61,8 +63,7 @@ int main(int argc, char* argv[]) {
 
     // Create logical data objects
     auto l_senddata = ctx.logical_data(h_senddata);
-    auto l_recvdata = ctx.logical_data(h_recvdata);
-
+    auto l_recvdata = ctx.logical_data(h_recvdata.data(), h_recvdata.size());
 
     // Instead, use the logical data objects directly in the task:
     ctx.task(l_senddata.read(), l_recvdata.write())->*[&]
