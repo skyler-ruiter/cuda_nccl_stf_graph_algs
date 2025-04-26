@@ -26,6 +26,23 @@ CPMAddPackage(
   OPTIONS "CCCL_ENABLE_UNSTABLE ON"
 )
 
+# Find the exact path to libcuda.so using find_library (added)
+find_library(CUDA_DRIVER_LIBRARY
+    NAMES cuda
+    PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib
+          /usr/lib64
+          /usr/lib
+          /usr/local/cuda/lib64
+          /usr/local/cuda/lib
+          ${CUDA_HOME}/lib64
+          ${CUDA_HOME}/lib
+    PATH_SUFFIXES stubs)
+
+if(NOT CUDA_DRIVER_LIBRARY)
+    message(FATAL_ERROR "Could not find libcuda.so. Please specify the correct location with -DCUDA_HOME=/path/to/cuda")
+endif()
+
 # Set path to NCCL
 set(NCCL_HOME /N/soft/sles15/nccl/2.25.1.1)
 
@@ -41,11 +58,12 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --extended-la
 
 # Add the executable (single target since both files are now using CuSTF)
 add_executable(mpi_nccl_testing tests/mpi_nccl_testing.cpp)
+
 target_link_libraries(mpi_nccl_testing 
     ${MPI_CXX_LIBRARIES}
     ${CUDA_LIBRARIES}
     ${NCCL_HOME}/lib/libnccl.so
-    cuda
+    ${CUDA_DRIVER_LIBRARY}
     cudart
     CCCL::CCCL
     CCCL::cudax
