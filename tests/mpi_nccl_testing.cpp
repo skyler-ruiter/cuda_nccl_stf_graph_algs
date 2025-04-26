@@ -59,20 +59,19 @@ int main(int argc, char* argv[]) {
     h_senddata[i] = world_rank * 10.0f + sin(i);
   }
 
-  // Create logical data objects
-  auto l_senddata = ctx.logical_data(h_senddata);
-  auto l_recvdata = ctx.logical_data(h_recvdata);
+    // Create logical data objects
+    auto l_senddata = ctx.logical_data(h_senddata);
+    auto l_recvdata = ctx.logical_data(h_recvdata);
 
-  // Create physical data objects to use with NCCL
-  auto p_send = l_senddata.physical();
-  auto p_recv = l_recvdata.physical();
 
-  // Create a task that performs the NCCL AllGather
-  ctx.task(p_send.read(), p_recv.write())
-          ->*[&](cudaStream_t stream, auto send_ptr, auto recv_ptr) {
-                NCCL_CHECK(ncclAllGather(send_ptr.data(), recv_ptr.data(), N,
-                                         ncclFloat, comm, stream));
-              };
+    // Instead, use the logical data objects directly in the task:
+    ctx.task(l_senddata.read(), l_recvdata.write())->*[&]
+        (cudaStream_t stream, auto send_slice, auto recv_slice) {
+        NCCL_CHECK(ncclAllGather(
+            send_slice.data_handle(), recv_slice.data_handle(), 
+            N, ncclFloat, comm, stream
+        ));
+    };
 
   // Execute all tasks
   ctx.finalize();
