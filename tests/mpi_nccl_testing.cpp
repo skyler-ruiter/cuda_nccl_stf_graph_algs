@@ -29,16 +29,6 @@ using namespace cuda::experimental::stf;
     }                                                               \
   } while (0)
 
-template <typename T>
-__global__ void axpy(T a, slice<T> x, slice<T> y) {
-  int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  int nthreads = gridDim.x * blockDim.x;
-
-  for (int ind = tid; ind < x.size(); ind += nthreads) {
-    y(ind) += a * x(ind);
-  }
-}
-
 int main(int argc, char* argv[]) {
   // Create STF context
   context ctx;
@@ -72,15 +62,6 @@ int main(int argc, char* argv[]) {
   // Create logical data objects
   auto l_senddata = ctx.logical_data(h_senddata);
   auto l_recvdata = ctx.logical_data(h_recvdata);
-
-  // First, apply an AXPY operation on our local data
-  float alpha = 3.14f;
-
-  // Create a task that performs Y = Y + alpha * X where Y is our send buffer
-  ctx.task(l_senddata.read(), l_senddata.rw())
-          ->*[&](cudaStream_t stream, auto sX, auto sY) {
-                axpy<<<16, 128, 0, stream>>>(alpha, sX, sY);
-              };
 
   // Create physical data objects to use with NCCL
   auto p_send = l_senddata.physical();
