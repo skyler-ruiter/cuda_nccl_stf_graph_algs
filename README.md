@@ -6,9 +6,9 @@
 
 ---
 
-#### Instructions:
+### Instructions:
 
-**BigRed200 Library Testing**
+*BigRed200 Library Testing*
 
 * Compile Program: `make mpi_nccl_testing`
 

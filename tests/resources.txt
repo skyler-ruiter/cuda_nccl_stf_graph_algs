@@ -1,0 +1,21 @@
+Resources:
+
+CUDASTF Docs:
+- https://nvidia.github.io/cccl/cudax/stf.html#
+
+CUDASTF MiniWeather Example:
+- https://github.com/mrnorman/miniWeather/blob/296e5da75a3cc75ae1eab8b8ecaf21fd4429d3e1/cudastf/miniWeather_cudastf.cu
+
+NCCL Docs:
+- https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html
+- https://docs.nvidia.com/deeplearning/nccl/install-guide/index.html#overview
+
+
+MULTI-GPU PROGRAMMING FOR EARTH SCIENTISTS:
+- https://www.cisl.ucar.edu/sites/default/files/2022-07/Multi%20Node%20Multi%20GPU%20Programming.pdf
+(part 2) - https://www.cisl.ucar.edu/sites/default/files/2022-09/11_MultiGPU_Part2.slides%20%282%29.pdf
+(video) - https://www.youtube.com/watch?v=U7e7R-3pdpk
+
+Makefile Example:
+- https://github.com/NVIDIA/multi-gpu-programming-models/blob/master/nccl/Makefile
+
