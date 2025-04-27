@@ -19,8 +19,8 @@
 
 using namespace cuda::experimental::stf;
 
-using vertex_t = int64_t;
-using edge_t = int64_t;
+using vertex_t = uint32_t;
+using edge_t = uint32_t;
 
 // ############################################
 
