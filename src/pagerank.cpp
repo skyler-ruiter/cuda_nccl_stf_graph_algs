@@ -1,13 +1,14 @@
 #include <cuda_runtime.h>
 #include <mpi.h>
 #include <nccl.h>
-#include <vector>
-#include <iostream>
-#include <string>
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cuda/experimental/stf.cuh> // CUDASTF
+#include <cuda/experimental/stf.cuh>
+#include <iostream>
+#include <string>
+#include <vector>
 
 using namespace cuda::experimental::stf;
 
@@ -32,7 +33,7 @@ using namespace cuda::experimental::stf;
   } while (0)
 
 int main(int argc, char* argv[]) {
-  
+  // Create STF context
   context ctx;
 
   MPI_Init(&argc, &argv);
@@ -61,18 +62,17 @@ int main(int argc, char* argv[]) {
     h_senddata[i] = world_rank * 10.0f + sin(i);
   }
 
-    // Create logical data objects
-    auto l_senddata = ctx.logical_data(h_senddata);
-    auto l_recvdata = ctx.logical_data(h_recvdata.data(), h_recvdata.size());
+  // Create logical data objects
+  auto l_senddata = ctx.logical_data(h_senddata);
+  auto l_recvdata = ctx.logical_data(h_recvdata.data(), h_recvdata.size());
 
-    // Instead, use the logical data objects directly in the task:
-    ctx.task(l_senddata.read(), l_recvdata.write())->*[&]
-        (cudaStream_t stream, auto send_slice, auto recv_slice) {
-        NCCL_CHECK(ncclAllGather(
-            send_slice.data_handle(), recv_slice.data_handle(), 
-            N, ncclFloat, comm, stream
-        ));
-    };
+  // Instead, use the logical data objects directly in the task:
+  ctx.task(l_senddata.read(), l_recvdata.write())
+          ->*[&](cudaStream_t stream, auto send_slice, auto recv_slice) {
+                NCCL_CHECK(ncclAllGather(send_slice.data_handle(),
+                                         recv_slice.data_handle(), N, ncclFloat,
+                                         comm, stream));
+              };
 
   // Execute all tasks
   ctx.finalize();

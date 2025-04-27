@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(dist_graph_algos CUDA CXX)
+project(cuda_nccl_stf_graph_algs CUDA CXX)
 
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES native)
@@ -57,9 +57,9 @@ include_directories(
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --extended-lambda")
 
 # Add the executable (single target since both files are now using CuSTF)
-add_executable(dist_bfs src/distributed_bfs.cpp)
+add_executable(mpi_nccl_testing tests/mpi_nccl_testing.cpp)
 
-target_link_libraries(dist_bfs 
+target_link_libraries(mpi_nccl_testing 
     ${MPI_CXX_LIBRARIES}
     ${CUDA_LIBRARIES}
     ${NCCL_HOME}/lib/libnccl.so
@@ -67,4 +67,12 @@ target_link_libraries(dist_bfs
     cudart
     CCCL::CCCL
     CCCL::cudax
+)
+
+# Add a custom target for running with MPI
+add_custom_target(run
+    COMMAND mpirun -np 2 ${CMAKE_BINARY_DIR}/mpi_nccl_testing
+    DEPENDS mpi_nccl_testing
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running mpi_nccl_testing with 2 MPI processes"
 )
