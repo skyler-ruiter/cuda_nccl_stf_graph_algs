@@ -225,7 +225,7 @@ int main(int argc, char* argv[]) {
         auto visited, 
         auto distances, 
         auto next_frontier_size) {
-      process_frontier_kernel<<<256, 256, 0, s>>>(
+      process_frontier_kernel<vertex_t><<<256, 256, 0, s>>>(
         row_offsets, column_indices, frontier, next_frontier, visited, distances, bfs_data.frontier_size, next_frontier_size, world_rank, world_size, level);
     };
 
