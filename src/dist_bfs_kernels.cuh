@@ -17,9 +17,9 @@ __global__ void reset_counter_kernel(slice<vertex_t> counter) {
 // process current frontier and populate next one
 template <typename T>
 __global__ void process_frontier_kernel(
-  slice<vertex_t> row_offsets,
-  slice<vertex_t> col_indices,
-  slice<vertex_t> frontier,
+  slice<const vertex_t> row_offsets,
+  slice<const vertex_t> col_indices,
+  slice<const vertex_t> frontier,
   slice<vertex_t> next_frontier,
   slice<int> visited,
   slice<int> distances,

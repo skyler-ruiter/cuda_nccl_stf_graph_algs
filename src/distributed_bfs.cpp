@@ -214,8 +214,8 @@ int main(int argc, char* argv[]) {
       l_column_indices.read(), 
       l_frontier.read(), 
       l_next_frontier.write(), 
-      l_visited.rw(), 
-      l_distances.rw(), 
+      l_visited.write(), 
+      l_distances.write(), 
       l_next_frontier_size.rw())->*[&](
         cudaStream_t s, 
         auto row_offsets, 
