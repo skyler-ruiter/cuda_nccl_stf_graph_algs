@@ -145,10 +145,10 @@ int main(int argc, char* argv[]) {
 
   // Load and partition the graph
   std::string graph_file = "../data/graph500-scale21-ef16_adj.edges";
-  Graph_CSR graph = loadAndPartitionGraph(graph_file, world_rank, world_size);
+  Graph_CSR graph = load_partition_graph(graph_file, world_rank, world_size);
 
   auto l_row_offsets = ctx.logical_data(graph.row_offsets.data(), graph.row_offsets.size());
-  auto l_column_indices = ctx.logical_data(graph.column_indices.data(), graph.column_indices.size());
+  auto l_column_indices = ctx.logical_data(graph.col_indices.data(), graph.col_indices.size());
 
   BFS_Data bfs_data;
   vertex_t source_vertex = 0;  // Starting vertex for BFS
