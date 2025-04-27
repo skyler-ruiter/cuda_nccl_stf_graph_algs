@@ -180,12 +180,12 @@ int main(int argc, char* argv[]) {
   auto l_next_frontier = ctx.logical_data(bfs_data.next_frontier.data(), bfs_data.next_frontier.size());
   auto l_visited = ctx.logical_data(bfs_data.visited.data(), bfs_data.visited.size());
   auto l_distances = ctx.logical_data(bfs_data.distances.data(), bfs_data.distances.size());
-
-  // TODO: Implement distributed BFS algorithm
   
   // counter for next frontier size
-  thrust::device_vector<vertex_t> d_next_frontier_size(1, 0);
-  auto l_next_frontier_size = ctx.logical_data(thrust::raw_pointer_cast(d_next_frontier_size.data()), 1);
+  vertex_t* d_next_frontier_size;
+  CHECK(cudaMalloc(&d_next_frontier_size, sizeof(vertex_t)));
+  CHECK(cudaMemset(d_next_frontier_size, 0, sizeof(vertex_t)));
+  auto l_next_frontier_size = ctx.logical_data(d_next_frontier_size, 1);
 
   // vector to track global frontier sizes from all processes
   std::vector<vertex_t> global_frontier_sizes(world_size);
@@ -198,7 +198,7 @@ int main(int argc, char* argv[]) {
   std::vector<vertex_t> send_frontier_sizes(1);
 
   // run until all frontiers empty
-  while (total_frontier_size > 0) {
+  // while (total_frontier_size > 0) {
     if (world_rank == 0) {
       printf("Level %d: Frontier size %ld\n", level, total_frontier_size);
     }
@@ -231,12 +231,13 @@ int main(int argc, char* argv[]) {
 
     ctx.finalize();
 
-  }
+  // }
 
   //! End of BFS Loop
 
 
   // Cleanup
+  CHECK(cudaFree(d_next_frontier_size));
   ncclCommDestroy(comm);
   MPI_Finalize();
   return 0;
