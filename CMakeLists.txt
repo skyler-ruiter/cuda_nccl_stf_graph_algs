@@ -59,6 +59,8 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --extended-la
 # Add the executable (single target since both files are now using CuSTF)
 add_executable(dist_bfs src/distributed_bfs.cpp)
 
+set_source_files_properties(src/distributed_bfs.cpp PROPERTIES LANGUAGE CUDA)
+
 target_link_libraries(dist_bfs 
     ${MPI_CXX_LIBRARIES}
     ${CUDA_LIBRARIES}

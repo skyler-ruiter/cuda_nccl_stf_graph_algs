@@ -185,14 +185,14 @@ int main(int argc, char* argv[]) {
   
   // counter for next frontier size
   thrust::device_vector<vertex_t> d_next_frontier_size(1, 0);
-  auto l_next_frontier_size = ctx.logaical_data(thrust::raw_pointer_cast(d_next_frontier_size.data()), 1);
+  auto l_next_frontier_size = ctx.logical_data(thrust::raw_pointer_cast(d_next_frontier_size.data()), 1);
 
   // vector to track global frontier sizes from all processes
   std::vector<vertex_t> global_frontier_sizes(world_size);
 
   //! Main BFS Loop
   int level = 0;
-  vertex_t total_frontier_size = bfs.data.frontier_size;
+  vertex_t total_frontier_size = bfs_data.frontier_size;
 
   // prep for allgather
   std::vector<vertex_t> send_frontier_sizes(1);
@@ -204,7 +204,7 @@ int main(int argc, char* argv[]) {
     }
 
     // reset next frontier size counter
-    ctx.task(l_next_frontier.size.write())->*[](cudaStream_t s, auto next_size) {
+    ctx.task(l_next_frontier_size.write())->*[](cudaStream_t s, auto next_size) {
       reset_counter_kernel<<<1, 1, 0, s>>>(next_size);
     };
 

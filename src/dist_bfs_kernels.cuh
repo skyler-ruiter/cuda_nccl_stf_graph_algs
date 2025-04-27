@@ -39,7 +39,7 @@ __global__ void process_frontier_kernel(
 
   __syncthreads();
 
-  for (int i = tid; i < frontier_Size; i += stride) {
+  for (int i = tid; i < frontier_size; i += stride) {
     vertex_t v = frontier(i);
 
     // if vertex is local
