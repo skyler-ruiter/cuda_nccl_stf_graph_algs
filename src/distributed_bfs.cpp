@@ -1,6 +1,9 @@
 #include <cuda_runtime.h>
 #include <mpi.h>
 #include <nccl.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+#include <thrust/reduce.h>
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +14,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
+
+#include "dist_bfs_kernels.cuh"
 
 using namespace cuda::experimental::stf;
 
@@ -76,11 +81,11 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int wor
     max_vertex_id = std::max(max_vertex_id, std::max(src, dst));
   }
 
-  graph.num_vertices = max_vertex_id + 1;
+  graph.num_vertices = max_vertex_id + 1; //? zero indexed or no?
   graph.num_edges = edges.size();
 
   // partition the graph where each gpu processes vertices where vertex_id % world_size == world_rank
-  graph.row_offsets.resize(graph.num_vertices / world_size + 2, 0);
+  graph.row_offsets.resize(graph.num_vertices / world_size + 2, 0); //? extra space for last vertex
 
   std::vector<int> edge_counts(graph.num_vertices / world_size + 1, 0);
   for (const auto& edge: edges) {
@@ -177,6 +182,59 @@ int main(int argc, char* argv[]) {
   auto l_distances = ctx.logical_data(bfs_data.distances.data(), bfs_data.distances.size());
 
   // TODO: Implement distributed BFS algorithm
+  
+  // counter for next frontier size
+  thrust::device_vector<vertex_t> d_next_frontier_size(1, 0);
+  auto l_next_frontier_size = ctx.logaical_data(thrust::raw_pointer_cast(d_next_frontier_size.data()), 1);
+
+  // vector to track global frontier sizes from all processes
+  std::vector<vertex_t> global_frontier_sizes(world_size);
+
+  //! Main BFS Loop
+  int level = 0;
+  vertex_t total_frontier_size = bfs.data.frontier_size;
+
+  // prep for allgather
+  std::vector<vertex_t> send_frontier_sizes(1);
+
+  // run until all frontiers empty
+  while (total_frontier_size > 0) {
+    if (world_rank == 0) {
+      printf("Level %d: Frontier size %ld\n", level, total_frontier_size);
+    }
+
+    // reset next frontier size counter
+    ctx.task(l_next_frontier.size.write())->*[](cudaStream_t s, auto next_size) {
+      reset_counter_kernel<<<1, 1, 0, s>>>(next_size);
+    };
+
+    // current frontier
+    ctx.task(
+      l_row_offsets.read(), 
+      l_column_indices.read(), 
+      l_frontier.read(), 
+      l_next_frontier.write(), 
+      l_visited.rw(), 
+      l_distances.rw(), 
+      l_next_frontier_size.rw())->*[&](
+        cudaStream_t s, 
+        auto row_offsets, 
+        auto column_indices, 
+        auto frontier, 
+        auto next_frontier, 
+        auto visited, 
+        auto distances, 
+        auto next_frontier_size) {
+      process_frontier_kernel<256, 256, 0, s>>>(
+        row_offsets, column_indices, frontier, next_frontier, visited, distances, bfs_data.frontier_size, next_frontier_size, world_rank, world_size, level);
+    };
+
+    ctx.finalize();
+
+  }
+
+  //! End of BFS Loop
+
 
   // Cleanup
   ncclCommDestroy(comm);

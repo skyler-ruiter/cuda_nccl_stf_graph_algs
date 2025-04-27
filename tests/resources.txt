@@ -19,3 +19,6 @@ MULTI-GPU PROGRAMMING FOR EARTH SCIENTISTS:
 Makefile Example:
 - https://github.com/NVIDIA/multi-gpu-programming-models/blob/master/nccl/Makefile
 
+Thrust Quick Start:
+- https://docs.nvidia.com/cuda/archive/9.1/pdf/Thrust_Quick_Start_Guide.pdf
+
