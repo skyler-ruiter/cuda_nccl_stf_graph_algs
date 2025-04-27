@@ -40,7 +40,7 @@ __global__ void process_frontier_kernel(
   __syncthreads();
 
   for (int i = tid; i < frontier_size; i += stride) {
-    vertex_t v = frontier(i);
+    vertex_t global_vertex = frontier(i);
 
     // if vertex is local
     if (global_vertex % world_size == world_rank) {
@@ -58,13 +58,13 @@ __global__ void process_frontier_kernel(
         if (owner == world_rank) {
           if (atomicCAS(&visited(local_neighbor), 0, 1) == 0) {
             // if not visited add to frontier
-            int pos = atomicAdd(&next_frontier_size(0), 1);
+            int pos = atomicAdd(next_frontier_size.data_handle(), 1);
             next_frontier(pos) = neighbor;
             distances(neighbor) = level + 1;
           }
         } else {
           // if in other partition
-          int pos = atomicAdd(&next_frontier_size(0), 1);
+          int pos = atomicAdd(next_frontier_size.data_handle(), 1);
           next_frontier(pos) = neighbor;
         }
       }
