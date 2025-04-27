@@ -58,13 +58,13 @@ __global__ void process_frontier_kernel(
         if (owner == world_rank) {
           if (atomicCAS(&visited(local_neighbor), 0, 1) == 0) {
             // if not visited add to frontier
-            int pos = atomicAdd(next_frontier_size.data_handle(), 1);
+            int pos = atomicAdd(&next_frontier_size(0), 1);
             next_frontier(pos) = neighbor;
-            distances(neighbor) = level + 1;
+            distances(local_neighbor) = level + 1;
           }
         } else {
           // if in other partition
-          int pos = atomicAdd(next_frontier_size.data_handle(), 1);
+          int pos = atomicAdd(&next_frontier_size(0), 1);
           next_frontier(pos) = neighbor;
         }
       }
