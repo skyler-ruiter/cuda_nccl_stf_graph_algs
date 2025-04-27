@@ -93,7 +93,7 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int wor
 
   // row offsets
   edge_t offset = 0;
-  for (vertex_t i = 0; i < edge_counts.size(), i++) {
+  for (vertex_t i = 0; i < edge_counts.size(); i++) {
     graph.row_offsets[i] = offset;
     offset += edge_counts[i];
   }
@@ -116,7 +116,7 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int wor
   }
 
   printf("Rank %d: Loaded %ld vertices and %ld edges in local partition\n",
-         world_rank, graph.row_offsets.size() - 1, graph.column_indices.size());
+         world_rank, graph.row_offsets.size() - 1, graph.col_indices.size());
 
   return graph;
 }
@@ -145,12 +145,12 @@ int main(int argc, char* argv[]) {
 
   // Load and partition the graph
   std::string graph_file = "../data/graph500-scale21-ef16_adj.edges";
-  GraphCSR graph = loadAndPartitionGraph(graph_file, world_rank, world_size);
+  Graph_CSR graph = loadAndPartitionGraph(graph_file, world_rank, world_size);
 
   auto l_row_offsets = ctx.logical_data(graph.row_offsets.data(), graph.row_offsets.size());
   auto l_column_indices = ctx.logical_data(graph.column_indices.data(), graph.column_indices.size());
 
-  BFSData bfs_data;
+  BFS_Data bfs_data;
   vertex_t source_vertex = 0;  // Starting vertex for BFS
 
   bfs_data.visited.resize(graph.num_vertices, 0);
