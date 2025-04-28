@@ -200,13 +200,37 @@ int main(int argc, char* argv[]) {
   auto l_send_frontier_sizes = ctx.logical_data(shape_of<slice<vertex_t>>(1));
 
   BFS_Data bfs_data(ctx, num_vertices);
-  vertex_t source_vertex = 1;  // Starting vertex for BFS
+
+  vertex_t source_vertex = 1;  // Default value
 
   if (world_rank == 0) {
-    printf(
-      "Rank %d: Source vertex %u (should be handled by rank %u), "
-      "num_vertices=%d\n",
-      world_rank, source_vertex, source_vertex % world_size, num_vertices);
+    if (argc > 1) {
+      // Use command line argument if provided
+      source_vertex = static_cast<vertex_t>(std::atoi(argv[1]));
+
+      // Validate input
+      if (source_vertex >= graph.num_vertices) {
+        printf("Warning: Source vertex %u exceeds graph size, using vertex 1\n",
+               source_vertex);
+        source_vertex = 1;
+      }
+    } else {
+      // Generate a random vertex if no argument provided
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_int_distribution<vertex_t> distrib(0,
+                                                      graph.num_vertices - 1);
+      source_vertex = distrib(gen);
+      printf("Selected random source vertex: %u\n", source_vertex);
+    }
+  }
+
+  // Broadcast source vertex to all processes
+  MPI_CHECK(MPI_Bcast(&source_vertex, 1, MPI_UINT32_T, 0, MPI_COMM_WORLD));
+
+  if (world_rank == 0) {
+    printf("Starting BFS from source vertex %u (handled by rank %u)\n",
+           source_vertex, source_vertex % world_size);
   }
 
   ctx.task(bfs_data.l_frontier.write(), bfs_data.l_visited.write(), bfs_data.l_distances.write(), bfs_data.l_frontier_size.write())->*[&](
@@ -416,6 +440,75 @@ int main(int argc, char* argv[]) {
         }
     };
 
+  };
+
+  cudaStreamSynchronize(ctx.task_fence());
+
+  // -------- BFS Statistics --------
+  // Gather statistics about the BFS traversal
+  ctx.host_task(bfs_data.l_visited.read(), bfs_data.l_distances.read())->*
+    [&](auto visited, auto distances) {
+      // 1. Count visited vertices
+      int local_visited = 0;
+      int max_distance = -1;
+      long long sum_distances = 0;
+
+      for (int i = 0; i < num_vertices; i++) {
+        if (visited(i) > 0) {
+          local_visited++;
+          max_distance = std::max(max_distance, distances(i));
+          sum_distances += distances(i);
+        }
+      }
+
+      // 2. Gather global statistics using MPI
+      int global_visited = 0;
+      int global_max_distance = 0;
+      long long global_sum_distances = 0;
+
+      MPI_Reduce(&local_visited, &global_visited, 1, MPI_INT, MPI_SUM, 0,
+                  MPI_COMM_WORLD);
+      MPI_Reduce(&max_distance, &global_max_distance, 1, MPI_INT, MPI_MAX, 0,
+                  MPI_COMM_WORLD);
+      MPI_Reduce(&sum_distances, &global_sum_distances, 1, MPI_LONG_LONG,
+                  MPI_SUM, 0, MPI_COMM_WORLD);
+
+      // 3. Collect per-level statistics
+      std::vector<int> local_level_counts(level + 1, 0);
+      for (int i = 0; i < num_vertices; i++) {
+        if (visited(i) > 0 && distances(i) >= 0 && distances(i) <= level) {
+          local_level_counts[distances(i)]++;
+        }
+      }
+
+      std::vector<int> global_level_counts(level + 1, 0);
+      MPI_Reduce(local_level_counts.data(), global_level_counts.data(),
+                  level + 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
+      // 4. Print results
+      if (world_rank == 0) {
+        double avg_distance =
+            global_visited > 0 ? (double)global_sum_distances / global_visited
+                                : 0;
+
+        double visit_percent = 100.0 * global_visited / (graph.num_vertices);
+
+        printf("\n===== BFS Statistics =====\n");
+        printf("Source vertex: %u\n", source_vertex);
+        printf("Visited vertices: %d (%.2f%% of graph)\n", global_visited,
+                visit_percent);
+        printf("Maximum distance from source: %d\n", global_max_distance);
+        printf("Average distance from source: %.2f\n", avg_distance);
+
+        printf("\nVertices discovered per level:\n");
+        printf("Level | Count   | Percent\n");
+        printf("---------------------------\n");
+        for (int i = 0; i <= global_max_distance; i++) {
+          printf("%-5d | %-7d | %.2f%%\n", i, global_level_counts[i],
+                  (double)global_level_counts[i] * 100 / global_visited);
+        }
+        printf("===========================\n\n");
+      }
   };
 
   ctx.finalize();
