@@ -6,3 +6,5 @@
 *.fatbin
 /data
 /build
+/.vscode
+/*build
