@@ -32,13 +32,6 @@ __global__ void init_frontier_kernel(
   }
 }
 
-// Reset the next_frontier_size counter
-__global__ void reset_counter_kernel(slice<vertex_t> counter) {
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        counter(0) = 0;
-    }
-}
-
 // process current frontier and populate next one
 __global__ void process_frontier_kernel(
   slice<const vertex_t> row_offsets,
@@ -101,30 +94,38 @@ __global__ void process_frontier_kernel(
   }
 }
 
-template <typename T>
-__global__ void filter_frontier_kernel(
-  slice<const vertex_t> frontier,
-  slice<int> visited,
-  slice<int> distances,
-  T frontier_size,
-  int world_rank,
-  int world_size,
-  int level) {
-
-  int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-
-  for (int i = tid; i < frontier_size; i += stride) {
-    vertex_t global_vertex = frontier(i);
+// Process received vertices
+__global__ void filter_received_vertices_kernel(
+    vertex_t* recv_buffer,
+    int total_recv,
+    slice<int> visited,
+    slice<int> distances,
+    slice<vertex_t> frontier,
+    slice<vertex_t> frontier_size,
+    int level,
+    int world_rank,
+    int world_size) {
     
-    // Only process if the vertex belongs to our partition
-    if (global_vertex % world_size == world_rank) {
-        vertex_t local_vertex = global_vertex / world_size;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    
+    for (int i = tid; i < total_recv; i += stride) {
+        vertex_t global_vertex = recv_buffer[i];
         
-        // Mark as visited if not already
-        if (atomicCAS(&visited(local_vertex), 0, 1) == 0) {
-            distances(local_vertex) = level + 1;
+        // Check if this vertex belongs to me
+        if (global_vertex % world_size == world_rank) {
+            // Convert to local vertex ID
+            vertex_t local_vertex = global_vertex / world_size;
+            
+            // Try to mark as visited (atomically)
+            if (atomicCAS(&visited(local_vertex), 0, 1) == 0) {
+                // If newly visited, set distance
+                distances(local_vertex) = level;
+                
+                // Add to frontier for next level
+                int pos = atomicAdd(&frontier_size(0), 1);
+                frontier(pos) = global_vertex;
+            }
         }
     }
-  }
 }

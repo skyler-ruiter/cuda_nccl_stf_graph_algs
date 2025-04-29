@@ -64,38 +64,3 @@ __global__ void sort_by_destination_kernel(
     }
 }
 
-// Process received vertices
-__global__ void filter_received_vertices_kernel(
-    vertex_t* recv_buffer,
-    int total_recv,
-    slice<int> visited,
-    slice<int> distances,
-    slice<vertex_t> frontier,
-    slice<vertex_t> frontier_size,
-    int level,
-    int world_rank,
-    int world_size) {
-    
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-    
-    for (int i = tid; i < total_recv; i += stride) {
-        vertex_t global_vertex = recv_buffer[i];
-        
-        // Check if this vertex belongs to me
-        if (global_vertex % world_size == world_rank) {
-            // Convert to local vertex ID
-            vertex_t local_vertex = global_vertex / world_size;
-            
-            // Try to mark as visited (atomically)
-            if (atomicCAS(&visited(local_vertex), 0, 1) == 0) {
-                // If newly visited, set distance
-                distances(local_vertex) = level;
-                
-                // Add to frontier for next level
-                int pos = atomicAdd(&frontier_size(0), 1);
-                frontier(pos) = global_vertex;
-            }
-        }
-    }
-}
