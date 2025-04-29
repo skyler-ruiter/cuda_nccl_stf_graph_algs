@@ -201,6 +201,8 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int wor
 
 int main(int argc, char* argv[]) {
 
+  // #### INIT #### //
+
   MPI_CHECK(MPI_Init(&argc, &argv));
 
   int world_size, world_rank;
@@ -224,7 +226,7 @@ int main(int argc, char* argv[]) {
   total_timer.start();
   bfs_init.start();
 
-  // Load and partition the graph
+  // #### LOAD & PARTITION GRAPH #### //
   std::string graph_file;
   if (argc < 3) {
     if (world_rank == 0) {
@@ -240,44 +242,22 @@ int main(int argc, char* argv[]) {
   }
   Graph_CSR graph = load_partition_graph(graph_file, world_rank, world_size);
 
-  context ctx;
-
-  auto l_row_offsets = ctx.logical_data(graph.row_offsets.data(), graph.row_offsets.size());
-  auto l_column_indices = ctx.logical_data(graph.col_indices.data(), graph.col_indices.size());
-
   int level = 0;
   int num_vertices = graph.num_vertices / world_size + 1;
 
-  auto l_global_frontier_sizes = ctx.logical_data(shape_of<slice<vertex_t>>(world_size));
-  auto l_send_frontier_sizes = ctx.logical_data(shape_of<slice<vertex_t>>(1));
-
-  // init BFS data structures
-  BFS_Data bfs_data(ctx, num_vertices);
-
-  int* d_send_counts;
-  int* d_send_displs;
-  CHECK(cudaMalloc(&d_send_counts, world_size * sizeof(int)));
-  CHECK(cudaMalloc(&d_send_displs, world_size * sizeof(int)));
-
-  // Allocate temporary buffers for NCCL
-  vertex_t* d_recv_buffer;
-  CHECK(cudaMalloc(&d_recv_buffer, world_size * sizeof(vertex_t)));
-
-  vertex_t source_vertex = 1;  // Default value
+  // ## SELECT SOURCE VERTEX #### //
+  vertex_t source_vertex = 1;
 
   if (world_rank == 0) {
     if (argc > 1) {
-      // Use command line argument if provided
       source_vertex = static_cast<vertex_t>(std::atoi(argv[1]));
 
-      // Validate input
       if (source_vertex >= graph.num_vertices) {
         printf("Warning: Source vertex %u exceeds graph size, using vertex 1\n",
                source_vertex);
         source_vertex = 1;
       }
     } else {
-      // Generate a random vertex if no argument provided
       std::random_device rd;
       std::mt19937 gen(rd());
       std::uniform_int_distribution<vertex_t> distrib(0,
@@ -290,10 +270,30 @@ int main(int argc, char* argv[]) {
   // Broadcast source vertex to all processes
   MPI_CHECK(MPI_Bcast(&source_vertex, 1, MPI_UINT32_T, 0, MPI_COMM_WORLD));
 
-  // if (world_rank == 0) {
-  //   printf("Starting BFS from source vertex %u (handled by rank %u)\n",
-  //          source_vertex, source_vertex % world_size);
-  // }
+  // Cudastf context
+  context ctx;
+
+  // #### LOGICAL DATA #### //
+  auto l_row_offsets = ctx.logical_data(graph.row_offsets.data(), graph.row_offsets.size());
+  auto l_column_indices = ctx.logical_data(graph.col_indices.data(), graph.col_indices.size());
+
+  auto l_global_frontier_sizes = ctx.logical_data(shape_of<slice<vertex_t>>(world_size));
+  auto l_send_frontier_sizes = ctx.logical_data(shape_of<slice<vertex_t>>(1));
+
+  BFS_Data bfs_data(ctx, num_vertices);
+
+  // #### NCCL Buffers #### //
+
+  int* d_send_counts;
+  int* d_send_displs;
+  CHECK(cudaMalloc(&d_send_counts, world_size * sizeof(int)));
+  CHECK(cudaMalloc(&d_send_displs, world_size * sizeof(int)));
+
+  // Allocate temporary buffers for NCCL
+  vertex_t* d_recv_buffer;
+  CHECK(cudaMalloc(&d_recv_buffer, world_size * sizeof(vertex_t)));
+
+  // #### INITIALIZE DATA STRUCTURES #### //
 
   ctx.task(bfs_data.l_frontier.write(), bfs_data.l_visited.write(), bfs_data.l_distances.write(), bfs_data.l_frontier_size.write())->*[&](
     cudaStream_t s, auto frontier, auto visited, auto distances, auto frontier_size) {
@@ -317,25 +317,27 @@ int main(int argc, char* argv[]) {
 
   cudaStreamSynchronize(ctx.task_fence());
 
+  //* TIMING
   perf.init_time = bfs_init.elapsed();
   perf.level_times.reserve(50);
   perf.level_comm_times.reserve(50);
   Timer bfs_timer;
   bfs_timer.start();
 
-  // //! #################
-  // //! # Main BFS Loop #
-  // //! #################
+  //! #################
+  //! # Main BFS Loop #
+  //! #################
 
   bool done = false;
   vertex_t total_size = 0;
 
   ctx.repeat([&]() {return !done;})->*[&](context ctx, size_t) {
 
+    //* TIMING
     Timer level_timer;
     level_timer.start();
 
-    // current frontier
+    // ##### PROCESS FRONTIER #####
     ctx.task(
       l_row_offsets.read(), 
       l_column_indices.read(), 
@@ -360,44 +362,63 @@ int main(int argc, char* argv[]) {
         row_offsets, column_indices, frontier, next_frontier, visited, distances, frontier_size, next_frontier_size, sent_vertices, world_rank, world_size, level);
     };
 
-    // cuda_safe_call(cudaStreamSynchronize(ctx.task_fence()));
-
-    // Replace this host_launch call
-    ctx.task(bfs_data.l_next_frontier_size.read(), l_send_frontier_sizes.write(), l_global_frontier_sizes.write())->*[&](
+    // #### GATHER FRONTIER SIZES #### //
+    ctx.task(
+      bfs_data.l_next_frontier_size.read(), 
+      l_send_frontier_sizes.write(), 
+      l_global_frontier_sizes.write())->*[&](
       cudaStream_t s, auto next_f_size, auto send_f_sizes, auto global_f_sizes) {
       
-      // Get the size of the next frontier (do this in device memory)
-      // First, use a kernel to copy the value
       copy_kernel<<<1, 1, 0, s>>>(next_f_size, send_f_sizes);
 
+      //* TIMING
       Timer comm_timer;
       comm_timer.start();
       
       // AllGather the frontier sizes using the stream from the task
       NCCL_CHECK(ncclGroupStart());
       NCCL_CHECK(ncclAllGather(
-          send_f_sizes.data_handle(),  // Use the logical data directly
+          send_f_sizes.data_handle(),
           d_recv_buffer, 
           1, ncclUint32, comm, s));
       NCCL_CHECK(ncclGroupEnd());
 
+      //* TIMING
       double comm_elapsed = comm_timer.elapsed();
       perf.comm_time += comm_elapsed;
       perf.level_comm_times.push_back(comm_elapsed);
       
       // Copy from temp buffer to logical data
-      copy_array_kernel<<<(world_size + 255)/256, 256, 0, s>>>(
-          d_recv_buffer, global_f_sizes, world_size);
-      
+      copy_array_kernel<<<(world_size + 255)/256, 256, 0, s>>>(d_recv_buffer, global_f_sizes, world_size);
     };
 
-    ctx.task(bfs_data.l_next_frontier.read(), bfs_data.l_next_frontier_size.read(), bfs_data.l_visited.rw(), bfs_data.l_distances.rw(), bfs_data.l_frontier.rw(), bfs_data.l_frontier_size.rw())->*[&](cudaStream_t s, auto next_frontier, auto next_frontier_size, auto visited, auto distances, auto frontier, auto frontier_size) {
+    // #### EXCHANGE FRONTIER VERTICES #### //
+    ctx.task(
+      bfs_data.l_next_frontier.read(), 
+      bfs_data.l_next_frontier_size.read(), 
+      bfs_data.l_visited.rw(), 
+      bfs_data.l_distances.rw(), 
+      bfs_data.l_frontier.rw(), 
+      bfs_data.l_frontier_size.rw())->*[&](
+        cudaStream_t s, 
+        auto next_frontier, 
+        auto next_frontier_size, 
+        auto visited, 
+        auto distances, 
+        auto frontier, 
+        auto frontier_size) {
+      
+      // Reset send counts
       CHECK(cudaMemset(d_send_counts, 0, world_size * sizeof(int)));
 
+      // Count vertices to send
       count_by_destination_kernel<<<256, 256, 0, s>>>(next_frontier, next_frontier_size, d_send_counts, world_size);
 
+      //* TIMING
       Timer comm_timer;
       comm_timer.start();
+
+      //! NO CUDA AWARE MPI ON BIGRED200 :(
 
       // transfer counts to host
       int* h_send_counts = new int[world_size];
@@ -407,6 +428,7 @@ int main(int argc, char* argv[]) {
       int* h_recv_counts = new int[world_size];
       MPI_CHECK(MPI_Alltoall(h_send_counts, 1, MPI_INT, h_recv_counts, 1, MPI_INT, MPI_COMM_WORLD));
 
+      //* TIMING
       double comm_elapsed = comm_timer.elapsed();
       perf.comm_time += comm_elapsed;
       perf.level_comm_times.push_back(comm_elapsed);
@@ -439,26 +461,25 @@ int main(int argc, char* argv[]) {
       vertex_t* d_recv_buff;
       CHECK(cudaMalloc(&d_recv_buff, total_recv * sizeof(vertex_t)));
 
-      // cudaStreamSynchronize(s);
-
-      // apparently no cuda-aware-mpi for alltoallv so use host buffers
-
       // copy send buffer to host
       vertex_t* h_send_buffer;
       vertex_t* h_recv_buffer;
       CHECK(cudaMallocHost(&h_send_buffer, total_send * sizeof(vertex_t)));
       CHECK(cudaMallocHost(&h_recv_buffer, total_recv * sizeof(vertex_t)));
 
+      //* TIMING
       comm_timer.start();
 
       CHECK(cudaMemcpy(h_send_buffer, d_send_buffer, total_send * sizeof(vertex_t), cudaMemcpyDeviceToHost));
 
+      // exchange send buffers of vertices
       MPI_CHECK(MPI_Alltoallv(h_send_buffer, h_send_counts, h_send_displs, MPI_UINT32_T,
                     h_recv_buffer, h_recv_counts, h_recv_displs, MPI_UINT32_T, MPI_COMM_WORLD));
 
       // copy recv buffer to device
       CHECK(cudaMemcpy(d_recv_buff, h_recv_buffer, total_recv * sizeof(vertex_t), cudaMemcpyHostToDevice));
 
+      //* TIMING
       comm_elapsed = comm_timer.elapsed();
       perf.comm_time += comm_elapsed;
       perf.level_comm_times.push_back(comm_elapsed);
@@ -481,17 +502,18 @@ int main(int argc, char* argv[]) {
       delete[] h_recv_displs;
     };
 
+    // #### RESET NEXT FRONTIER SIZE #### //
     ctx.task(bfs_data.l_next_frontier_size.rw())->*[&](cudaStream_t s, auto next_frontier_size) {
       // Reset next frontier size for next iteration
       CHECK(cudaMemsetAsync(next_frontier_size.data_handle(), 0, sizeof(vertex_t), s));
     };
 
+    // #### CHECK FOR TERMINATION #### //
     ctx.host_launch(l_global_frontier_sizes.read())->*
       [&](auto global_frontier_sizes) {
-        // Increment level for next iteration
+        
         level++;
 
-        // Add safety check to prevent infinite loop
         if (level > 30) {
           done = true;
           if (world_rank == 0) {
@@ -509,10 +531,12 @@ int main(int argc, char* argv[]) {
 
     };
 
+    //* TIMING
     perf.level_times.push_back(level_timer.elapsed());
 
   };
 
+  //* TIMING
   perf.bfs_time = bfs_timer.elapsed();
   perf.total_time = total_timer.elapsed();
 
@@ -523,10 +547,9 @@ int main(int argc, char* argv[]) {
   cudaStreamSynchronize(ctx.task_fence());
 
   // -------- BFS Statistics --------
-  // Gather statistics about the BFS traversal
   ctx.host_launch(bfs_data.l_visited.read(), bfs_data.l_distances.read())->*
     [&](auto visited, auto distances) {
-      // 1. Count visited vertices
+      // Count visited vertices
       int local_visited = 0;
       int max_distance = -1;
       long long sum_distances = 0;
@@ -539,7 +562,7 @@ int main(int argc, char* argv[]) {
         }
       }
 
-      // 2. Gather global statistics using MPI
+      // Gather global statistics
       int global_visited = 0;
       int global_max_distance = 0;
       long long global_sum_distances = 0;
@@ -551,7 +574,7 @@ int main(int argc, char* argv[]) {
       MPI_CHECK(MPI_Reduce(&sum_distances, &global_sum_distances, 1, MPI_LONG_LONG,
                   MPI_SUM, 0, MPI_COMM_WORLD));
 
-      // 3. Collect per-level statistics
+      // Collect per-level statistics
       std::vector<int> local_level_counts(level + 1, 0);
       for (int i = 0; i < num_vertices; i++) {
         if (visited(i) > 0 && distances(i) >= 0 && distances(i) <= level) {
@@ -563,7 +586,7 @@ int main(int argc, char* argv[]) {
       MPI_CHECK(MPI_Reduce(local_level_counts.data(), global_level_counts.data(),
                   level + 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD));
 
-      // 4. Print results
+      // Print results
       if (world_rank == 0) {
         double avg_distance =
             global_visited > 0 ? (double)global_sum_distances / global_visited

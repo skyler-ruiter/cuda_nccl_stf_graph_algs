@@ -165,7 +165,7 @@ int main(int argc, char* argv[]) {
   NCCL_CHECK(ncclCommInitRank(&comm, world_size, id, world_rank));
 
   // Load and partition the graph
-  std::string graph_file = "../data/graph500-scale21-ef16_adj.edges";
+  std::string graph_file = "../data/graph500-scale19-ef16_adj.edges";
   if (argc > 2) {
     graph_file = argv[2];
   }
