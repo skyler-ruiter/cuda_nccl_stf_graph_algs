@@ -8,4 +8,6 @@
 /build
 /.vscode
 /*build
-/output
+/benchmarking/output
+*.out
+*.err
