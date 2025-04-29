@@ -70,3 +70,17 @@ target_link_libraries(dist_bfs
     CCCL::CCCL
     CCCL::cudax
 )
+
+add_executable(dist_pagerank src/pagerank.cpp)
+
+set_source_files_properties(src/pagerank.cpp PROPERTIES LANGUAGE CUDA)
+
+target_link_libraries(dist_pagerank 
+    ${MPI_CXX_LIBRARIES}
+    ${CUDA_LIBRARIES}
+    ${NCCL_HOME}/lib/libnccl.so
+    ${CUDA_DRIVER_LIBRARY}
+    cudart
+    CCCL::CCCL
+    CCCL::cudax
+)

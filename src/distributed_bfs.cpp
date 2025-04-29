@@ -225,7 +225,19 @@ int main(int argc, char* argv[]) {
   bfs_init.start();
 
   // Load and partition the graph
-  std::string graph_file = "../data/graph500-scale21-ef16_adj.edges";
+  std::string graph_file;
+  if (argc < 3) {
+    if (world_rank == 0) {
+      printf("Usage: %s <source_vertex> <graph_file>\n", argv[0]);
+      printf("Using default graph file: ../data/graph500-scale21-ef16_adj.edges\n");
+    }
+    graph_file = "../data/graph500-scale21-ef16_adj.edges";
+  } else {
+    graph_file = argv[2];
+    if (world_rank == 0) {
+      printf("Using graph file: %s\n", graph_file.c_str());
+    }
+  }
   Graph_CSR graph = load_partition_graph(graph_file, world_rank, world_size);
 
   context ctx;
@@ -378,7 +390,6 @@ int main(int argc, char* argv[]) {
           d_recv_buffer, global_f_sizes, world_size);
       
     };
-
 
     ctx.task(bfs_data.l_next_frontier.read(), bfs_data.l_next_frontier_size.read(), bfs_data.l_visited.rw(), bfs_data.l_distances.rw(), bfs_data.l_frontier.rw(), bfs_data.l_frontier_size.rw())->*[&](cudaStream_t s, auto next_frontier, auto next_frontier_size, auto visited, auto distances, auto frontier, auto frontier_size) {
       CHECK(cudaMemset(d_send_counts, 0, world_size * sizeof(int)));
