@@ -5,7 +5,7 @@
 #SBATCH --output=dist_graph_prof.out
 #SBATCH --error=dist_graph_prof.err
 #SBATCH --account=r01156
-#SBATCH --partition=gpu
+#SBATCH --partition=gpu-debug
 #SBATCH --nodes=2
 #SBATCH --ntasks=4
 #SBATCH --gpus-per-node 2
