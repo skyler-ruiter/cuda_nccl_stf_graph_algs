@@ -82,8 +82,7 @@ __global__ void process_frontier_kernel(
           }
         } else {
           // Remote vertex - only send if not sent before
-          vertex_t global_neighbor_idx = neighbor / world_size;
-          if (atomicCAS(&sent_vertices(global_neighbor_idx), 0, 1) == 0) {
+          if (atomicCAS(&sent_vertices(neighbor), 0, 1) == 0) {
             // Only add to next_frontier if we haven't sent it before
             int pos = atomicAdd(&next_frontier_size(0), 1);
             next_frontier(pos) = neighbor;
@@ -126,6 +125,22 @@ __global__ void filter_received_vertices_kernel(
                 int pos = atomicAdd(&frontier_size(0), 1);
                 frontier(pos) = global_vertex;
             }
+        }
+    }
+}
+
+__global__ void mark_local_vertices_kernel(
+    slice<int> sent_vertices,
+    int world_rank,
+    int world_size,
+    int max_vertex_id) {
+    
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    
+    for (vertex_t vid = tid; vid < max_vertex_id; vid += stride) {
+        if (vid % world_size == world_rank) {
+            sent_vertices(vid) = 0; 
         }
     }
 }

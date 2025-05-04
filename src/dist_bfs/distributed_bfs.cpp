@@ -117,14 +117,14 @@ struct BFS_Data {
   mutable logical_data<slice<vertex_t>> l_next_frontier_size;
   mutable logical_data<slice<int>> l_sent_vertices;
   
-  BFS_Data(context& ctx, vertex_t num_vertices) {
-    l_frontier = ctx.logical_data(shape_of<slice<vertex_t>>(num_vertices));
-    l_next_frontier = ctx.logical_data(shape_of<slice<vertex_t>>(num_vertices));
+  BFS_Data(context& ctx, vertex_t num_vertices, uint64_t global_vertices) {
+    l_frontier = ctx.logical_data(shape_of<slice<vertex_t>>(global_vertices));
+    l_next_frontier = ctx.logical_data(shape_of<slice<vertex_t>>(global_vertices));
     l_visited = ctx.logical_data(shape_of<slice<int>>(num_vertices));
     l_distances = ctx.logical_data(shape_of<slice<int>>(num_vertices));
     l_frontier_size = ctx.logical_data(shape_of<slice<vertex_t>>(1));
     l_next_frontier_size = ctx.logical_data(shape_of<slice<vertex_t>>(1));
-    l_sent_vertices = ctx.logical_data(shape_of<slice<int>>(num_vertices));
+    l_sent_vertices = ctx.logical_data(shape_of<slice<int>>(global_vertices));
   }
 
   BFS_Data(const BFS_Data&) = delete;
@@ -158,11 +158,15 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int wor
   graph.row_offsets.resize(graph.num_vertices / world_size + 2, 0); //? extra space for last vertex
 
   std::vector<int> edge_counts(graph.num_vertices / world_size + 1, 0);
-  for (const auto& edge: edges) {
+  for (const auto& edge : edges) {
     if (edge.first % world_size == world_rank) {
-      // global to local id
       vertex_t local_src = edge.first / world_size;
       edge_counts[local_src]++;
+    }
+    // Add reverse edge counting
+    if (edge.second % world_size == world_rank) {
+      vertex_t local_dst = edge.second / world_size;
+      edge_counts[local_dst]++;
     }
   }
 
@@ -180,13 +184,21 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int wor
   std::fill(edge_counts.begin(), edge_counts.end(), 0);
 
   // fill col_indices
-  for (const auto& edge: edges) {
+  for (const auto& edge : edges) {
+    // Forward edge
     if (edge.first % world_size == world_rank) {
-      // global to local id
       vertex_t local_src = edge.first / world_size;
       vertex_t position = graph.row_offsets[local_src] + edge_counts[local_src];
       graph.col_indices[position] = edge.second;
       edge_counts[local_src]++;
+    }
+
+    // Reverse edge
+    if (edge.second % world_size == world_rank) {
+      vertex_t local_dst = edge.second / world_size;
+      vertex_t position = graph.row_offsets[local_dst] + edge_counts[local_dst];
+      graph.col_indices[position] = edge.first;
+      edge_counts[local_dst]++;
     }
   }
 
@@ -240,6 +252,7 @@ int main(int argc, char* argv[]) {
       printf("Using graph file: %s\n", graph_file.c_str());
     }
   }
+
   Graph_CSR graph = load_partition_graph(graph_file, world_rank, world_size);
 
   int level = 0;
@@ -280,7 +293,7 @@ int main(int argc, char* argv[]) {
   auto l_global_frontier_sizes = ctx.logical_data(shape_of<slice<vertex_t>>(world_size));
   auto l_send_frontier_sizes = ctx.logical_data(shape_of<slice<vertex_t>>(1));
 
-  BFS_Data bfs_data(ctx, num_vertices);
+  BFS_Data bfs_data(ctx, num_vertices, graph.num_vertices);
 
   // #### NCCL Buffers #### //
 
@@ -291,7 +304,7 @@ int main(int argc, char* argv[]) {
 
   // Allocate temporary buffers for NCCL
   vertex_t* d_recv_buffer;
-  CHECK(cudaMalloc(&d_recv_buffer, world_size * sizeof(vertex_t)));
+  CHECK(cudaMalloc(&d_recv_buffer, world_size * 10000 * sizeof(vertex_t)));
 
   // #### INITIALIZE DATA STRUCTURES #### //
 
@@ -304,7 +317,7 @@ int main(int argc, char* argv[]) {
 
   ctx.task(bfs_data.l_sent_vertices.write())->*[&](cudaStream_t s, auto sent_vertices) {
     // Initialize sent_vertices to 0
-    CHECK(cudaMemsetAsync(sent_vertices.data_handle(), 0, num_vertices * sizeof(int), s));
+    CHECK(cudaMemsetAsync(sent_vertices.data_handle(), 0, graph.num_vertices * sizeof(int), s));
   };
 
   ctx.host_launch(l_global_frontier_sizes.write(), l_send_frontier_sizes.write())->*[&](
@@ -506,6 +519,16 @@ int main(int argc, char* argv[]) {
     ctx.task(bfs_data.l_next_frontier_size.rw())->*[&](cudaStream_t s, auto next_frontier_size) {
       // Reset next frontier size for next iteration
       CHECK(cudaMemsetAsync(next_frontier_size.data_handle(), 0, sizeof(vertex_t), s));
+    };
+
+    // #### RESET SENT VERTICES FOR INTERNAL VERTICES #### //
+    ctx.task(bfs_data.l_sent_vertices.rw())->*[&](cudaStream_t s, auto sent_vertices) {
+      mark_local_vertices_kernel<<<256, 256, 0, s>>>(
+        sent_vertices, world_rank, world_size, graph.num_vertices - 1);
+      
+      // This resolves the issue without full reset
+      if (world_rank == 0 && level % 5 == 0)
+        printf("Marking local vertices as available at level %d\n", level);
     };
 
     // #### CHECK FOR TERMINATION #### //

@@ -56,10 +56,10 @@ include_directories(
 # CUDA flags
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --extended-lambda")
 
-# Add the executable (single target since both files are now using CuSTF)
-add_executable(dist_bfs src/distributed_bfs.cpp)
+#### MPI+CUDASTF+NCCL DIST BFS ####
+add_executable(dist_bfs src/dist_bfs/distributed_bfs.cpp)
 
-set_source_files_properties(src/distributed_bfs.cpp PROPERTIES LANGUAGE CUDA)
+set_source_files_properties(src/dist_bfs/distributed_bfs.cpp PROPERTIES LANGUAGE CUDA)
 
 target_link_libraries(dist_bfs 
     ${MPI_CXX_LIBRARIES}
@@ -71,11 +71,27 @@ target_link_libraries(dist_bfs
     CCCL::cudax
 )
 
-add_executable(dist_pagerank src/pagerank.cpp)
+#### MPI+NCCL DIST SSSP ####
+add_executable(dist_pagerank src/pagerank/pagerank.cpp)
 
-set_source_files_properties(src/pagerank.cpp PROPERTIES LANGUAGE CUDA)
+set_source_files_properties(src/pagerank/pagerank.cpp PROPERTIES LANGUAGE CUDA)
 
 target_link_libraries(dist_pagerank 
+    ${MPI_CXX_LIBRARIES}
+    ${CUDA_LIBRARIES}
+    ${NCCL_HOME}/lib/libnccl.so
+    ${CUDA_DRIVER_LIBRARY}
+    cudart
+    CCCL::CCCL
+    CCCL::cudax
+)
+
+# #### MPI+NCCL DIST BFS ####
+add_executable(no_stf_dist_bfs src/dist_bfs/no_stf_dist_bfs.cpp)
+
+set_source_files_properties(src/dist_bfs/no_stf_dist_bfs.cpp PROPERTIES LANGUAGE CUDA)
+
+target_link_libraries(no_stf_dist_bfs 
     ${MPI_CXX_LIBRARIES}
     ${CUDA_LIBRARIES}
     ${NCCL_HOME}/lib/libnccl.so
