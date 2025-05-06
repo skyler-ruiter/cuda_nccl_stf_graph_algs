@@ -6,6 +6,20 @@
 
 ---
 
+### Codebase Notes:
+
+* Tried to get all the code working in time but couldn't get it working in time
+
+* I'm confident given more time i could implement and optimize 
+
+* Wrote most of it myself but did us AI for some of the boilerplate and debugging
+
+  * provided some of the resources I used in the `resources/` directory
+
+* There are some random testing files in tests, not tests of actual library mostly library and sanity checks
+
+---
+
 ### Instructions:
 
 *BigRed200 Library Testing*
@@ -20,16 +34,6 @@
 
 * Run Code: `srun -N 2 -n 4 ./mpi_nccl_testing`
 
-* Expected Output:
-
-```
-sruiter@login1:~/school/cuda_nccl_stf_graph_algs/src> srun -N 2 -n 4 ./mpi_nccl_testing
-Rank 0 received: 0.00 0.84 0.91 0.14 -0.76 -0.96 -0.28 0.66 0.99 0.41 -0.54 -1.00 -0.54 0.42 0.99 0.65 10.00 10.84 10.91 10.14 9.24 9.04 9.72 10.66 10.99 10.41 9.46 9.00 9.46 10.42 10.99 10.65 20.00 20.84 20.91 20.14 19.24 19.04 19.72 20.66 20.99 20.41 19.46 19.00 19.46 20.42 20.99 20.65 30.00 30.84 30.91 30.14 29.24 29.04 29.72 30.66 30.99 30.41 29.46 29.00 29.46 30.42 30.99 30.65 
-Rank 1 received: 0.00 0.84 0.91 0.14 -0.76 -0.96 -0.28 0.66 0.99 0.41 -0.54 -1.00 -0.54 0.42 0.99 0.65 10.00 10.84 10.91 10.14 9.24 9.04 9.72 10.66 10.99 10.41 9.46 9.00 9.46 10.42 10.99 10.65 20.00 20.84 20.91 20.14 19.24 19.04 19.72 20.66 20.99 20.41 19.46 19.00 19.46 20.42 20.99 20.65 30.00 30.84 30.91 30.14 29.24 29.04 29.72 30.66 30.99 30.41 29.46 29.00 29.46 30.42 30.99 30.65 
-Rank 2 received: 0.00 0.84 0.91 0.14 -0.76 -0.96 -0.28 0.66 0.99 0.41 -0.54 -1.00 -0.54 0.42 0.99 0.65 10.00 10.84 10.91 10.14 9.24 9.04 9.72 10.66 10.99 10.41 9.46 9.00 9.46 10.42 10.99 10.65 20.00 20.84 20.91 20.14 19.24 19.04 19.72 20.66 20.99 20.41 19.46 19.00 19.46 20.42 20.99 20.65 30.00 30.84 30.91 30.14 29.24 29.04 29.72 30.66 30.99 30.41 29.46 29.00 29.46 30.42 30.99 30.65 
-Rank 3 received: 0.00 0.84 0.91 0.14 -0.76 -0.96 -0.28 0.66 0.99 0.41 -0.54 -1.00 -0.54 0.42 0.99 0.65 10.00 10.84 10.91 10.14 9.24 9.04 9.72 10.66 10.99 10.41 9.46 9.00 9.46 10.42 10.99 10.65 20.00 20.84 20.91 20.14 19.24 19.04 19.72 20.66 20.99 20.41 19.46 19.00 19.46 20.42 20.99 20.65 30.00 30.84 30.91 30.14 29.24 29.04 29.72 30.66 30.99 30.41 29.46 29.00 29.46 30.42 30.99 30.65 
-```
-
 ---
 
 *BigRed200 Distributed BFS*
@@ -38,14 +42,52 @@ Rank 3 received: 0.00 0.84 0.91 0.14 -0.76 -0.96 -0.28 0.66 0.99 0.41 -0.54 -1.0
 
 * Will need to allocate gpu nodes to run (see salloc above for gpu-debug example) and load the modules in the previous example.
 
-* Compile Program (in project home):
+* default vertex and dataset are provided
 
-```
+* **STF Version not currently working** (use non-stf version to compare against cpu)
+
+* Compile Programs (in project home):
+
+``` 
 cmake -S . -B build
 cd build
 make
+mpicxx -o cpu_bfs ../src/dist_bfs/cpu_dist_bfs.cpp
 ```
 
-* Run Code: `srun -N 2 -n 4 ./dist_bfs [vertex(optional)]`
+* Run Distributed BFS (MPI+NCCL+STF) Code: `srun -N 2 -n 4 ./dist_bfs [vertex] [dataset]` 
+
+* Run Distributed BFS (MPI+NCCL): `srun -N 2 -n 4 ./no_stf_dist_bfs [vertex] [dataset]`
+
+* Run Distributed BFS (MPI): `srun -N 2 -n 4 ./cpu_bfs [vertex] [dataset]`
+
+* Run Benchmarks: `sbatch benchmarking/run_tests.sh`
+
+---
+
+*BigRed200 Distributed Pagerank*
+
+* **Description:** Runs a distributed BFS search from a random or CL provided vertex across 4 gpus and 2 nodes, with 2 nodes per gpu and 4 total tasks.
+
+* Will need to allocate gpu nodes to run (see salloc above for gpu-debug example) and load the modules in the previous example.
+
+* default datasets are provided
+
+* **Not currently working (ANY VERSION)** 
+
+* Compile Programs (in project home):
+
+``` 
+cmake -S . -B build
+cd build
+make
+mpicxx -o cpu_bfs ../src/dist_bfs/cpu_pagerank.cpp
+```
+
+* Run Distributed BFS (MPI+NCCL+STF) Code: `srun -N 2 -n 4 ./dist_pagerank [dataset]` 
+
+* Run Distributed BFS (MPI+NCCL): `srun -N 2 -n 4 ./no_stf_dist_pagerank [dataset]`
+
+* Run Distributed BFS (MPI): `srun -N 2 -n 4 ./cpu_pagerank [dataset]`
 
 ---
