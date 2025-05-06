@@ -56,6 +56,54 @@ plt.tight_layout()
 plt.savefig(os.path.join(PLOT_DIR, 'scaling_vertices.png'))
 plt.close()
 
+# --------------- Computation vs Communication Times ---------------
+plt.figure(figsize=(10, 8))
+
+# Create a scatter plot of computation vs communication times
+for impl in implementations:
+    impl_df = df[df['implementation'] == impl]
+    
+    # Plot each dataset as a point
+    plt.scatter(
+        impl_df['computation_time'], 
+        impl_df['communication_time'],
+        s=100,  # marker size
+        label=impl,
+        alpha=0.7,
+        marker='o' if impl == 'CPU' else '^'  # different markers for CPU vs GPU
+    )
+    
+    # Add dataset labels to each point
+    for _, row in impl_df.iterrows():
+        dataset_name = row['dataset'].strip()  # Strip any whitespace
+        plt.annotate(
+            dataset_name,
+            (row['computation_time'], row['communication_time']),
+            xytext=(5, 5),
+            textcoords='offset points',
+            fontsize=8
+        )
+
+# Find max value for equal axis scaling and diagonal line
+max_val = max(df['computation_time'].max(), df['communication_time'].max()) * 1.1
+plt.plot([0, max_val], [0, max_val], 'r--', label='Communication = Computation')
+
+plt.xlabel('Computation Time (seconds)')
+plt.ylabel('Communication Time (seconds)')
+plt.title('Computation vs Communication Times by Implementation')
+plt.grid(True, alpha=0.3)
+plt.legend()
+
+# Fix the spacing issue between y-axis and x=0
+plt.axis('scaled')  # Use 'scaled' instead of 'equal'
+plt.xlim(0, max_val)
+plt.ylim(0, max_val)
+
+# Add a tight_layout with appropriate padding
+plt.tight_layout(pad=1.1)
+plt.savefig(os.path.join(PLOT_DIR, 'computation_vs_communication.png'))
+plt.close()
+
 # --------------- Communication to Computation Ratio ---------------
 # Change to a vertical layout with 2 rows, 1 column and make figure taller than wide
 fig, axes = plt.subplots(2, 1, figsize=(8, 10), sharex=True)

@@ -91,3 +91,15 @@ mpicxx -o cpu_bfs ../src/dist_bfs/cpu_pagerank.cpp
 * Run Distributed BFS (MPI): `srun -N 2 -n 4 ./cpu_pagerank [dataset]`
 
 ---
+
+### Data:
+
+* Graph500 Scale Datasets: https://networkrepository.com/graph500.php
+
+  * Tested scale[18, 19, 21, 23]
+
+* Web UK 2002 Web Graph: https://networkrepository.com/web-uk-2002-all.php
+
+* put in a folder in home directory called `data/` with any other edgelists
+
+  * may need to adapt codebases to read in data formats correctly (run web-uk for example)
