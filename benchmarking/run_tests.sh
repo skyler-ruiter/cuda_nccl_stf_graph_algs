@@ -15,7 +15,7 @@
 
 BASE_DIR=${HOME}/school/cuda_nccl_stf_graph_algs
 BUILD_DIR=${BASE_DIR}/temp_build
-GPU_BIN=${BUILD_DIR}/dist_bfs
+GPU_BIN=${BUILD_DIR}/no_stf_dist_bfs
 CPU_BIN=${BUILD_DIR}/cpu_bfs
 DATA_DIR=${BASE_DIR}/data
 
@@ -30,10 +30,29 @@ ls -la ${DATA_DIR}
 
 module load PrgEnv-nvidia cudatoolkit/12.2 gcc/12.2 nccl cmake
 
-OUTPUT_DIR=${BASE_DIR}benchmarking/output/
+# Create timestamped output directory for better organization
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+OUTPUT_DIR=${BASE_DIR}/benchmarking/output/${TIMESTAMP}/
+echo "Creating output directory: ${OUTPUT_DIR}"
 mkdir -p ${OUTPUT_DIR}
 
-SOURCE_V=10
+# Check if output directory was created successfully
+if [ ! -d "${OUTPUT_DIR}" ]; then
+    echo "ERROR: Could not create output directory ${OUTPUT_DIR}"
+    exit 1
+fi
+
+# Check if output directory is writable
+if [ ! -w "${OUTPUT_DIR}" ]; then
+    echo "ERROR: Output directory ${OUTPUT_DIR} is not writable"
+    exit 1
+fi
+
+echo "Output directory created successfully: ${OUTPUT_DIR}"
+echo "Output directory contents (should be empty):"
+ls -la ${OUTPUT_DIR}
+
+SOURCE_V=8
 
 # Check if data directory exists and has files
 if [ ! -d "${DATA_DIR}" ] || [ -z "$(ls -A ${DATA_DIR})" ]; then
@@ -48,11 +67,39 @@ for DATASET in ${DATA_DIR}/*; do
     echo "Running BFS on ${DATASET_NAME}"
     echo "Full dataset path: ${DATASET}"
 
+    # Define explicit output file paths
+    CPU_OUT="${OUTPUT_DIR}${DATASET_NAME}_cpu.out"
+    GPU_OUT="${OUTPUT_DIR}${DATASET_NAME}_gpu.out"
+    
     # run the CPU BFS
     echo "Running CPU BFS"
-    srun -n 4 -N 2 --gpus-per-task=0 ${CPU_BIN} ${SOURCE_V} ${DATASET} > ${OUTPUT_DIR}/${DATASET_NAME}_cpu.out
+    CMD="srun -n 4 -N 2 --gpus-per-task=0 --output=${CPU_OUT} ${CPU_BIN} ${SOURCE_V} ${DATASET}"
+    echo "Running command: ${CMD}"
+    eval ${CMD}
+    
+    # Check if CPU output file was created
+    echo "Checking for CPU output file: ${CPU_OUT}"
+    if [ -f "${CPU_OUT}" ]; then
+        echo "CPU output file created successfully, size: $(du -h ${CPU_OUT} | cut -f1)"
+    else
+        echo "WARNING: CPU output file was not created"
+    fi
 
     # run the GPU BFS
     echo "Running GPU BFS"
-    srun -n 4 -N 2 ${GPU_BIN} ${SOURCE_V} ${DATASET} > ${OUTPUT_DIR}/${DATASET_NAME}_gpu.out
+    CMD="srun -n 4 -N 2 --output=${GPU_OUT} ${GPU_BIN} ${SOURCE_V} ${DATASET}"
+    echo "Running command: ${CMD}"
+    eval ${CMD}
+    
+    # Check if GPU output file was created
+    echo "Checking for GPU output file: ${GPU_OUT}"
+    if [ -f "${GPU_OUT}" ]; then
+        echo "GPU output file created successfully, size: $(du -h ${GPU_OUT} | cut -f1)"
+    else
+        echo "WARNING: GPU output file was not created"
+    fi
 done
+
+echo "Benchmark completed. All output files should be in: ${OUTPUT_DIR}"
+echo "Output directory contents:"
+ls -la ${OUTPUT_DIR}

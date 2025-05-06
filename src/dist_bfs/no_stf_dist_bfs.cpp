@@ -13,6 +13,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <sstream>
 
 #include "no_bfs_kernels.cuh"  // BFS kernels
 
@@ -155,6 +156,20 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank,
   if (!file.is_open()) {
     std::cerr << "Error opening file: " << fname << std::endl;
     exit(EXIT_FAILURE);
+  }
+
+  if (fname.find("web-uk") != std::string::npos) {
+    // if web-uk data read in first 2 lines as comments and next line as graph statistics
+    std::string line;
+    std::getline(file, line); // Skip first line
+    std::getline(file, line); // Skip second line
+    std::getline(file, line); // Read graph statistics
+    std::istringstream iss(line);
+    vertex_t num_rows, num_cols, num_nnz;
+    iss >> num_rows >> num_cols >> num_nnz;
+    if (world_rank == 0) {
+      std::cout << "Graph statistics: " << num_rows << " rows, " << num_cols << " cols, " << num_nnz << " non-zeros" << std::endl;
+    }
   }
 
   std::vector<std::pair<vertex_t, vertex_t>> edges;
@@ -308,6 +323,11 @@ int main(int argc, char* argv[]) {
   // Broadcast source vertex to all processes
   MPI_CHECK(MPI_Bcast(&source_vertex, 1, MPI_UINT32_T, 0, MPI_COMM_WORLD));
 
+  std::vector<int> h_send_counts(world_size);
+  std::vector<int> h_recv_counts(world_size);
+  std::vector<int> h_send_displs(world_size);
+  std::vector<int> h_recv_displs(world_size);
+
   // create BFS_data
   BFS_Data bfs_data(num_vertices, graph.num_vertices, world_size);
 
@@ -383,10 +403,10 @@ int main(int argc, char* argv[]) {
 
     // #### PREPARE COMMUNICATION #### //
     // Get the total send/recv counts to allocate buffers
-    int total_send, total_recv;
-    CHECK(cudaMemcpyAsync(&total_send, d_total_send, sizeof(int),
+    vertex_t total_send, total_recv;
+    CHECK(cudaMemcpyAsync(&total_send, d_total_send, sizeof(vertex_t),
                           cudaMemcpyDeviceToHost, stream));
-    CHECK(cudaMemcpyAsync(&total_recv, d_total_recv, sizeof(int),
+    CHECK(cudaMemcpyAsync(&total_recv, d_total_recv, sizeof(vertex_t),
                           cudaMemcpyDeviceToHost, stream));
     CHECK(cudaStreamSynchronize(stream));
 
@@ -402,10 +422,10 @@ int main(int argc, char* argv[]) {
 
     // init counts
     CHECK(cudaMemsetAsync(d_send_counts, 0, world_size * sizeof(int), stream));
-
+    
     // #### SORT VERTICES INTO SEND BUFFER #### //
     if (total_send > 0) {
-      sort_by_destination_kernel<<<256, 256, 2*world_size*sizeof(int), stream>>>(bfs_data.d_remote_vertices,
+      sort_by_destination_kernel<<<256, 256, 0, stream>>>(bfs_data.d_remote_vertices,
         bfs_data.d_remote_counts, d_send_buffer, d_send_counts, d_send_displs, num_vertices,  world_size);
     }
 
@@ -413,10 +433,6 @@ int main(int argc, char* argv[]) {
     comm_timer = Timer();
     comm_timer.start();
     
-    std::vector<int> h_send_counts(world_size);
-    std::vector<int> h_recv_counts(world_size);
-    std::vector<int> h_send_displs(world_size);
-    std::vector<int> h_recv_displs(world_size);
     // Get send counts (what THIS rank will send to others)
     CHECK(cudaMemcpyAsync(h_send_counts.data(), bfs_data.d_remote_counts,
                           world_size * sizeof(int), cudaMemcpyDeviceToHost,
@@ -427,7 +443,6 @@ int main(int argc, char* argv[]) {
     CHECK(cudaMemcpyAsync(h_temp_all_counts, d_all_send_counts,
                           world_size * world_size * sizeof(int),
                           cudaMemcpyDeviceToHost, stream));
-    CHECK(cudaStreamSynchronize(stream));
 
     // Extract correct column from the matrix - what others are sending to me
     for (int i = 0; i < world_size; i++) {
@@ -492,13 +507,10 @@ int main(int argc, char* argv[]) {
       CHECK(cudaMemsetAsync(bfs_data.d_next_frontier_size, 0, sizeof(vertex_t), stream));
     }
 
-    CHECK(cudaStreamSynchronize(stream));
-
     // Free only the dynamic buffers
     if (d_send_buffer) CHECK(cudaFree(d_send_buffer));
     if (d_recv_buffer) CHECK(cudaFree(d_recv_buffer));
 
-    MPI_CHECK(MPI_Barrier(MPI_COMM_WORLD));
   }
 
   perf.bfs_time = bfs_timer.elapsed();

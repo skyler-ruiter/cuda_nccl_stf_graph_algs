@@ -1,7 +1,6 @@
 #include <cuda_runtime.h>  // CUDA Runtime API
 #include <mpi.h>           // MPI API
 #include <nccl.h>          // NCCL API
-#include <cuda/experimental/stf.cuh>  // CUDASTF API
 #include <sys/time.h>
 
 #include <algorithm>
@@ -12,10 +11,11 @@
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
-using namespace cuda::experimental::stf;
+#include "pagerank_kernels.cuh"  // PageRank kernels
 
 using vertex_t = uint32_t;
 using edge_t = uint32_t;
@@ -67,12 +67,67 @@ using edge_t = uint32_t;
 
 // ############################################
 
+//! Timing utility structure
+struct Timer {
+  struct timeval start_time;
+
+  void start() { gettimeofday(&start_time, NULL); }
+
+  double elapsed() {
+    struct timeval current_time;
+    gettimeofday(&current_time, NULL);
+    return (current_time.tv_sec - start_time.tv_sec) +
+           (current_time.tv_usec - start_time.tv_usec) * 1e-6;
+  }
+};
+
+//! Pagerank Performance structure
+struct PagerankPerformance {
+  double init_time = 0;
+  double pagerank_time = 0;
+  double total_time = 0;
+  double comm_time = 0;
+  std::vector<double> level_times;
+  std::vector<double> level_comm_times;
+
+  void reset() {
+    init_time = pagerank_time = total_time = comm_time = 0;
+    level_times.clear();
+    level_comm_times.clear();
+  }
+};
+
 //! Graph Representation
 struct Graph_CSR {
   std::vector<vertex_t> row_offsets;
   std::vector<vertex_t> col_indices;
   vertex_t num_vertices;
   edge_t num_edges;
+
+  vertex_t* d_row_offsets;
+  vertex_t* d_column_indices;
+};
+
+//! PageRank Data Structure
+struct PageRank_Data {
+  float* d_pagerank;      // current pagerank values
+  float* d_next_pagerank; // next iterations pagerank values
+  float* d_outgoing_contrib; // outgoing contributions
+
+  PageRank_Data(vertex_t num_vertices, vertex_t global_vertices, int world_size) {
+    CHECK(cudaMalloc(&d_pagerank, num_vertices * sizeof(float)));
+    CHECK(cudaMalloc(&d_next_pagerank, num_vertices * sizeof(float)));
+    CHECK(cudaMalloc(&d_outgoing_contrib, num_vertices * sizeof(float)));
+  }
+
+  ~PageRank_Data() {
+    CHECK(cudaFree(d_pagerank));
+    CHECK(cudaFree(d_next_pagerank));
+    CHECK(cudaFree(d_outgoing_contrib));
+  }
+
+  PageRank_Data(const PageRank_Data&) = delete;
+  PageRank_Data& operator=(const PageRank_Data&) = delete;
 };
 
 //! Load and Partition Graph
@@ -88,6 +143,22 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank,
     exit(EXIT_FAILURE);
   }
 
+  if (fname.find("web-uk") != std::string::npos) {
+    // if web-uk data read in first 2 lines as comments and next line as graph
+    // statistics
+    std::string line;
+    std::getline(file, line);  // Skip first line
+    std::getline(file, line);  // Skip second line
+    std::getline(file, line);  // Read graph statistics
+    std::istringstream iss(line);
+    vertex_t num_rows, num_cols, num_nnz;
+    iss >> num_rows >> num_cols >> num_nnz;
+    if (world_rank == 0) {
+      std::cout << "Graph statistics: " << num_rows << " rows, " << num_cols
+                << " cols, " << num_nnz << " non-zeros" << std::endl;
+    }
+  }
+
   std::vector<std::pair<vertex_t, vertex_t>> edges;
   vertex_t src, dst, max_vertex_id = 0;
 
@@ -101,13 +172,11 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank,
 
   // partition the graph where each gpu processes vertices where vertex_id %
   // world_size == world_rank
-  graph.row_offsets.resize(graph.num_vertices / world_size + 2,
-                           0);  //? extra space for last vertex
+  graph.row_offsets.resize(graph.num_vertices / world_size + 2, 0);
 
   std::vector<int> edge_counts(graph.num_vertices / world_size + 1, 0);
   for (const auto& edge : edges) {
     if (edge.first % world_size == world_rank) {
-      // global to local id
       vertex_t local_src = edge.first / world_size;
       edge_counts[local_src]++;
     }
@@ -128,8 +197,8 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank,
 
   // fill col_indices
   for (const auto& edge : edges) {
+    // Forward edge
     if (edge.first % world_size == world_rank) {
-      // global to local id
       vertex_t local_src = edge.first / world_size;
       vertex_t position = graph.row_offsets[local_src] + edge_counts[local_src];
       graph.col_indices[position] = edge.second;
@@ -147,6 +216,8 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank,
 // ############################################
 
 int main(int argc, char* argv[]) {
+
+  // #### INIT #### //
   MPI_CHECK(MPI_Init(&argc, &argv));
 
   int world_size, world_rank;
@@ -164,69 +235,71 @@ int main(int argc, char* argv[]) {
   MPI_CHECK(MPI_Barrier(MPI_COMM_WORLD));
   NCCL_CHECK(ncclCommInitRank(&comm, world_size, id, world_rank));
 
-  // Load and partition the graph
-  std::string graph_file = "../data/graph500-scale19-ef16_adj.edges";
-  if (argc > 2) {
+  // make a cuda stream
+  cudaStream_t stream;
+  CHECK(cudaStreamCreate(&stream));
+
+  //* TIMING
+  Timer total_timer, pagerank_init;
+  PagerankPerformance perf;
+  total_timer.start();
+  pagerank_init.start();
+
+  // #### LOAD & PARTITION GRAPH #### //
+  std::string graph_file;
+  if (argc < 3) {
+    if (world_rank == 0) {
+      printf("Usage: %s <source_vertex> <graph_file>\n", argv[0]);
+      printf(
+          "Using default graph file: "
+          "../data/graph500-scale19-ef16_adj.edges\n");
+    }
+    graph_file = "../data/graph500-scale19-ef16_adj.edges";
+  } else {
     graph_file = argv[2];
+    if (world_rank == 0) {
+      printf("Using graph file: %s\n", graph_file.c_str());
+    }
   }
   Graph_CSR graph = load_partition_graph(graph_file, world_rank, world_size);
 
-  int local_num_vertices = graph.row_offsets.size() - 1;
-  int global_num_vertices = graph.num_vertices;
+  int num_vertices = graph.num_vertices / world_size + 1;
 
-  float init_rank = 1.0f / global_num_vertices;
-  float tolerance = 1e-6f;
-  int NITER = 100;
+  CHECK(cudaMalloc(&graph.d_row_offsets, graph.row_offsets.size() * sizeof(vertex_t)));
+  CHECK(cudaMalloc(&graph.d_column_indices, graph.col_indices.size() * sizeof(vertex_t)));
+  CHECK(cudaMemcpyAsync(graph.d_row_offsets, graph.row_offsets.data(), graph.row_offsets.size() * sizeof(vertex_t), cudaMemcpyHostToDevice, stream));
+  CHECK(cudaMemcpyAsync(graph.d_column_indices, graph.col_indices.data(), graph.col_indices.size() * sizeof(vertex_t), cudaMemcpyHostToDevice, stream));
 
-  // Local PageRank vectors
-  std::vector<float> local_page_rank(local_num_vertices, init_rank);
-  std::vector<float> local_new_page_rank(local_num_vertices, 0.0f);
+  PageRank_Data pagerank_data(num_vertices, graph.num_vertices, world_size);
 
-  // Global PageRank vector for gathering results
-  std::vector<float> global_page_rank;
-  if (world_rank == 0) {
-    global_page_rank.resize(global_num_vertices);
-  }
+  const int max_iterations = 20;
+  const float damping_factor = 0.85f;
+  float* global_pagerank = nullptr;
 
-  context ctx;
+  float init_value = 1.0f / graph.num_vertices;
+  initialize_pagerank_kernel<<<(num_vertices + 255) / 256, 256, 0, stream>>>(
+    pagerank_data.d_pagerank, num_vertices, init_value);
 
-  // STF logical data
-  auto loffsets = ctx.logical_data(&graph.row_offsets[0], graph.row_offsets.size());
-  auto lnonzeros = ctx.logical_data(&graph.col_indices[0], graph.col_indices.size());
-  auto lpage_rank = ctx.logical_data(&local_page_rank[0], local_page_rank.size());
-  auto lnew_page_rank = ctx.logical_data(&local_new_page_rank[0], local_new_page_rank.size());
-  auto lmax_diff = ctx.logical_data(shape_of<scalar_view<float>>());
+  // ### MAIN PAGE RANK LOOP ### //
+  for (int iter = 0; iter < max_iterations; iter++) {
 
-  float* d_all_page_ranks;
-  CHECK(cudaMalloc(&d_all_page_ranks, global_num_vertices * sizeof(float)));
-  CHECK(cudaMemset(d_all_page_ranks, 0, global_num_vertices * sizeof(float)));
+    reset_pagerank_kernel<<<(num_vertices + 255) / 256, 256, 0, stream>>>(
+      pagerank_data.d_next_pagerank, num_vertices, (1.0f - damping_factor) / graph.num_vertices);
 
-  // Create view of all page ranks
-  auto l_all_page_ranks = ctx.logical_data(d_all_page_ranks, global_num_vertices);
+    // Compute local contributions
+    pagerank_iterate<<<256, 256, 0, stream>>>(
+        graph.d_row_offsets, graph.d_column_indices, pagerank_data.d_pagerank,
+        pagerank_data.d_next_pagerank, num_vertices, damping_factor);
 
-  for (int iter = 0; iter < NITER; ++iter) {
-    // gather all pagerank values
+    // Synchronize contributions globally
+    NCCL_CHECK(ncclAllReduce(pagerank_data.d_next_pagerank,
+                             pagerank_data.d_next_pagerank, num_vertices,
+                             ncclFloat, ncclSum, comm, stream));
 
-    NCCL_CHECK(ncclGroupStart());
-    NCCL_CHECK(ncclAllGather(
-      local_page_rank.data(), // send buff
-      d_all_page_ranks + (world_rank * local_num_vertices), // recv buff
-      local_num_vertices, // count
-      ncclFloat,
-      comm,
-      0));
-    NCCL_CHECK(ncclGroupEnd());
+    // Swap pointers for next iteration
+    std::swap(pagerank_data.d_pagerank, pagerank_data.d_next_pagerank);
 
+  }  // ### END PAGE RANK LOOP ### //
 
-    // end loop early
-    break;
-
-  }
-
-  ctx.finalize();
-
-  // Cleanup
-  ncclCommDestroy(comm);
-  MPI_CHECK(MPI_Finalize());
   return 0;
 }

@@ -112,9 +112,16 @@ __global__ void process_frontier_kernel(
         }
       } else {
         // vertex belongs to another rank
-        int pos = atomicAdd(&send_counts[owner], 1);
-        if (pos < num_vertices) { 
-            sent_vertices[owner * num_vertices + pos] = neighbor;
+        unsigned int current_count = atomicAdd(&send_counts[owner], 0);
+        if (current_count < num_vertices) {
+          // Only increment if we haven't hit the limit
+          unsigned int old_count = atomicAdd(&send_counts[owner], 1);
+          if (old_count < num_vertices) {
+            sent_vertices[owner * num_vertices + old_count] = neighbor;
+          } else {
+            // If we've exceeded the limit (race condition), decrement the counter back
+            atomicSub(&send_counts[owner], 1);
+          }
         }
       }
     }

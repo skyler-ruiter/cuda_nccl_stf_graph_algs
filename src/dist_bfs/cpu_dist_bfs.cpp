@@ -6,8 +6,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <queue>
 #include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -78,6 +80,22 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank,
   if (!file.is_open()) {
     fprintf(stderr, "Error opening file: %s\n", fname.c_str());
     MPI_Abort(MPI_COMM_WORLD, 1);
+  }
+
+  if (fname.find("web-uk") != std::string::npos) {
+    // if web-uk data read in first 2 lines as comments and next line as graph
+    // statistics
+    std::string line;
+    std::getline(file, line);  // Skip first line
+    std::getline(file, line);  // Skip second line
+    std::getline(file, line);  // Read graph statistics
+    std::istringstream iss(line);
+    vertex_t num_rows, num_cols, num_nnz;
+    iss >> num_rows >> num_cols >> num_nnz;
+    if (world_rank == 0) {
+      std::cout << "Graph statistics: " << num_rows << " rows, " << num_cols
+                << " cols, " << num_nnz << " non-zeros" << std::endl;
+    }
   }
 
   std::vector<std::pair<vertex_t, vertex_t>> edges;

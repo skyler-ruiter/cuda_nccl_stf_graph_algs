@@ -1,22 +1,21 @@
-#include <cuda_runtime.h>             // CUDA Runtime API
-#include <mpi.h>                      // MPI API
-#include <nccl.h>                     // NCCL API
-#include <cuda/experimental/stf.cuh>  // CUDASTF API
+#include <cuda_runtime.h>  // CUDA Runtime API
+#include <mpi.h>           // MPI API
+#include <nccl.h>          // NCCL API
+#include <sys/time.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
+#include <cuda/experimental/stf.cuh>  // CUDASTF API
 #include <fstream>
 #include <iostream>
+#include <random>
 #include <string>
 #include <vector>
-#include <random>
-#include <ctime>
-#include <sys/time.h>
 
-#include "helper_kernels.cuh"   // Helper kernels
-#include "dist_bfs_kernels.cuh" // BFS kernels
+#include "dist_bfs_kernels.cuh"  // BFS kernels
 
 using namespace cuda::experimental::stf;
 
@@ -24,6 +23,7 @@ using vertex_t = uint32_t;
 using edge_t = uint32_t;
 
 //! Error Handling Macros
+
 // ############################################
 #define CHECK(cmd)                                                  \
   do {                                                              \
@@ -34,7 +34,6 @@ using edge_t = uint32_t;
       exit(EXIT_FAILURE);                                           \
     }                                                               \
   } while (0)
-
 #define NCCL_CHECK(cmd)                                             \
   do {                                                              \
     ncclResult_t r = cmd;                                           \
@@ -44,29 +43,28 @@ using edge_t = uint32_t;
       exit(EXIT_FAILURE);                                           \
     }                                                               \
   } while (0)
-
-#define MPI_CHECK(call)                                                                \
-    {                                                                                 \
-        int mpi_status = call;                                                        \
-        if (MPI_SUCCESS != mpi_status) {                                              \
-            char mpi_error_string[MPI_MAX_ERROR_STRING];                              \
-            int mpi_error_string_length = 0;                                          \
-            MPI_Error_string(mpi_status, mpi_error_string, &mpi_error_string_length); \
-            if (NULL != mpi_error_string)                                             \
-                fprintf(stderr,                                                       \
-                        "ERROR: MPI call \"%s\" in line %d of file %s failed "        \
-                        "with %s "                                                    \
-                        "(%d).\n",                                                    \
-                        #call, __LINE__, __FILE__, mpi_error_string, mpi_status);     \
-            else                                                                      \
-                fprintf(stderr,                                                       \
-                        "ERROR: MPI call \"%s\" in line %d of file %s failed "        \
-                        "with %d.\n",                                                 \
-                        #call, __LINE__, __FILE__, mpi_status);                       \
-            exit( mpi_status );                                                       \
-        }                                                                             \
-    }
-
+#define MPI_CHECK(call)                                                   \
+  {                                                                       \
+    int mpi_status = call;                                                \
+    if (MPI_SUCCESS != mpi_status) {                                      \
+      char mpi_error_string[MPI_MAX_ERROR_STRING];                        \
+      int mpi_error_string_length = 0;                                    \
+      MPI_Error_string(mpi_status, mpi_error_string,                      \
+                       &mpi_error_string_length);                         \
+      if (NULL != mpi_error_string)                                       \
+        fprintf(stderr,                                                   \
+                "ERROR: MPI call \"%s\" in line %d of file %s failed "    \
+                "with %s "                                                \
+                "(%d).\n",                                                \
+                #call, __LINE__, __FILE__, mpi_error_string, mpi_status); \
+      else                                                                \
+        fprintf(stderr,                                                   \
+                "ERROR: MPI call \"%s\" in line %d of file %s failed "    \
+                "with %d.\n",                                             \
+                #call, __LINE__, __FILE__, mpi_status);                   \
+      exit(mpi_status);                                                   \
+    }                                                                     \
+  }
 // ############################################
 
 //! Timing utility structure
@@ -105,6 +103,9 @@ struct Graph_CSR {
   std::vector<vertex_t> col_indices;
   vertex_t num_vertices;
   edge_t num_edges;
+
+  vertex_t* d_row_offsets;
+  vertex_t* d_column_indices;
 };
 
 //! BFS Data Structure
@@ -115,16 +116,18 @@ struct BFS_Data {
   mutable logical_data<slice<int>> l_distances;
   mutable logical_data<slice<vertex_t>> l_frontier_size;
   mutable logical_data<slice<vertex_t>> l_next_frontier_size;
-  mutable logical_data<slice<int>> l_sent_vertices;
-  
-  BFS_Data(context& ctx, vertex_t num_vertices, uint64_t global_vertices) {
-    l_frontier = ctx.logical_data(shape_of<slice<vertex_t>>(global_vertices));
-    l_next_frontier = ctx.logical_data(shape_of<slice<vertex_t>>(global_vertices));
+  mutable logical_data<slice<vertex_t>> l_remote_vertices;
+  mutable logical_data<slice<int>> l_remote_counts;
+
+  BFS_Data(context& ctx, vertex_t num_vertices, vertex_t global_vertices, int world_size) {
+    l_frontier = ctx.logical_data(shape_of<slice<vertex_t>>(num_vertices));
+    l_next_frontier = ctx.logical_data(shape_of<slice<vertex_t>>(num_vertices));
     l_visited = ctx.logical_data(shape_of<slice<int>>(num_vertices));
     l_distances = ctx.logical_data(shape_of<slice<int>>(num_vertices));
     l_frontier_size = ctx.logical_data(shape_of<slice<vertex_t>>(1));
     l_next_frontier_size = ctx.logical_data(shape_of<slice<vertex_t>>(1));
-    l_sent_vertices = ctx.logical_data(shape_of<slice<int>>(global_vertices));
+    l_remote_vertices = ctx.logical_data(shape_of<slice<vertex_t>>(global_vertices));
+    l_remote_counts = ctx.logical_data(shape_of<slice<int>>(world_size));
   }
 
   BFS_Data(const BFS_Data&) = delete;
@@ -134,13 +137,30 @@ struct BFS_Data {
 //! Load and Partition Graph
 // ############################################
 
-Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int world_size) {
+Graph_CSR load_partition_graph(const std::string& fname, int world_rank,
+                               int world_size) {
   Graph_CSR graph;
   std::ifstream file(fname);
 
   if (!file.is_open()) {
     std::cerr << "Error opening file: " << fname << std::endl;
     exit(EXIT_FAILURE);
+  }
+
+  if (fname.find("web-uk") != std::string::npos) {
+    // if web-uk data read in first 2 lines as comments and next line as graph
+    // statistics
+    std::string line;
+    std::getline(file, line);  // Skip first line
+    std::getline(file, line);  // Skip second line
+    std::getline(file, line);  // Read graph statistics
+    std::istringstream iss(line);
+    vertex_t num_rows, num_cols, num_nnz;
+    iss >> num_rows >> num_cols >> num_nnz;
+    if (world_rank == 0) {
+      std::cout << "Graph statistics: " << num_rows << " rows, " << num_cols
+                << " cols, " << num_nnz << " non-zeros" << std::endl;
+    }
   }
 
   std::vector<std::pair<vertex_t, vertex_t>> edges;
@@ -151,22 +171,19 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int wor
     max_vertex_id = std::max(max_vertex_id, std::max(src, dst));
   }
 
-  graph.num_vertices = max_vertex_id + 1; //? zero indexed or no?
+  graph.num_vertices = max_vertex_id + 1;
   graph.num_edges = edges.size();
 
-  // partition the graph where each gpu processes vertices where vertex_id % world_size == world_rank
-  graph.row_offsets.resize(graph.num_vertices / world_size + 2, 0); //? extra space for last vertex
+  // partition the graph where each gpu processes vertices where vertex_id %
+  // world_size == world_rank
+  graph.row_offsets.resize(graph.num_vertices / world_size + 2, 0);
 
   std::vector<int> edge_counts(graph.num_vertices / world_size + 1, 0);
   for (const auto& edge : edges) {
     if (edge.first % world_size == world_rank) {
+      // global to local id
       vertex_t local_src = edge.first / world_size;
       edge_counts[local_src]++;
-    }
-    // Add reverse edge counting
-    if (edge.second % world_size == world_rank) {
-      vertex_t local_dst = edge.second / world_size;
-      edge_counts[local_dst]++;
     }
   }
 
@@ -185,20 +202,12 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int wor
 
   // fill col_indices
   for (const auto& edge : edges) {
-    // Forward edge
     if (edge.first % world_size == world_rank) {
+      // global to local id
       vertex_t local_src = edge.first / world_size;
       vertex_t position = graph.row_offsets[local_src] + edge_counts[local_src];
       graph.col_indices[position] = edge.second;
       edge_counts[local_src]++;
-    }
-
-    // Reverse edge
-    if (edge.second % world_size == world_rank) {
-      vertex_t local_dst = edge.second / world_size;
-      vertex_t position = graph.row_offsets[local_dst] + edge_counts[local_dst];
-      graph.col_indices[position] = edge.first;
-      edge_counts[local_dst]++;
     }
   }
 
@@ -212,7 +221,6 @@ Graph_CSR load_partition_graph(const std::string& fname, int world_rank, int wor
 // ############################################
 
 int main(int argc, char* argv[]) {
-
   // #### INIT #### //
 
   MPI_CHECK(MPI_Init(&argc, &argv));
@@ -243,19 +251,20 @@ int main(int argc, char* argv[]) {
   if (argc < 3) {
     if (world_rank == 0) {
       printf("Usage: %s <source_vertex> <graph_file>\n", argv[0]);
-      printf("Using default graph file: ../data/graph500-scale21-ef16_adj.edges\n");
+      printf(
+          "Using default graph file: "
+          "../data/graph500-scale19-ef16_adj.edges\n");
     }
-    graph_file = "../data/graph500-scale21-ef16_adj.edges";
+    graph_file = "../data/graph500-scale19-ef16_adj.edges";
   } else {
     graph_file = argv[2];
     if (world_rank == 0) {
       printf("Using graph file: %s\n", graph_file.c_str());
     }
   }
-
   Graph_CSR graph = load_partition_graph(graph_file, world_rank, world_size);
 
-  int level = 0;
+  int level = 1;
   int num_vertices = graph.num_vertices / world_size + 1;
 
   // ## SELECT SOURCE VERTEX #### //
@@ -290,42 +299,49 @@ int main(int argc, char* argv[]) {
   auto l_row_offsets = ctx.logical_data(graph.row_offsets.data(), graph.row_offsets.size());
   auto l_column_indices = ctx.logical_data(graph.col_indices.data(), graph.col_indices.size());
 
-  auto l_global_frontier_sizes = ctx.logical_data(shape_of<slice<vertex_t>>(world_size));
-  auto l_send_frontier_sizes = ctx.logical_data(shape_of<slice<vertex_t>>(1));
+  auto l_all_send_counts = ctx.logical_data(shape_of<slice<int>>(world_size * world_size));
+  auto l_recv_counts = ctx.logical_data(shape_of<slice<int>>(world_size));
+  auto l_send_displs = ctx.logical_data(shape_of<slice<int>>(world_size));
+  auto l_recv_displs = ctx.logical_data(shape_of<slice<int>>(world_size));
+  auto l_total_send = ctx.logical_data(shape_of<slice<vertex_t>>(1));
+  auto l_total_recv = ctx.logical_data(shape_of<slice<vertex_t>>(1));
+  auto l_send_counts = ctx.logical_data(shape_of<slice<int>>(world_size));
 
-  BFS_Data bfs_data(ctx, num_vertices, graph.num_vertices);
+  logical_data<slice<vertex_t>> l_send_buffer;
+  logical_data<slice<vertex_t>> l_recv_buffer;
+  vertex_t total_send = 0; 
+  vertex_t total_recv = 0; 
 
-  // #### NCCL Buffers #### //
-
-  int* d_send_counts;
-  int* d_send_displs;
-  CHECK(cudaMalloc(&d_send_counts, world_size * sizeof(int)));
-  CHECK(cudaMalloc(&d_send_displs, world_size * sizeof(int)));
-
-  // Allocate temporary buffers for NCCL
-  vertex_t* d_recv_buffer;
-  CHECK(cudaMalloc(&d_recv_buffer, world_size * 10000 * sizeof(vertex_t)));
+  BFS_Data bfs_data(ctx, num_vertices, graph.num_vertices, world_size);
 
   // #### INITIALIZE DATA STRUCTURES #### //
 
-  ctx.task(bfs_data.l_frontier.write(), bfs_data.l_visited.write(), bfs_data.l_distances.write(), bfs_data.l_frontier_size.write())->*[&](
-    cudaStream_t s, auto frontier, auto visited, auto distances, auto frontier_size) {
-    // Initialize the BFS data structures
-    init_frontier_kernel<<<1, 1, 0, s>>>(
-      frontier, visited, distances, frontier_size, source_vertex, world_size, world_rank);
+  ctx.task(bfs_data.l_frontier.write(), bfs_data.l_visited.write(),
+           bfs_data.l_distances.write(), bfs_data.l_frontier_size.write())->*[&]
+           (cudaStream_t s, auto frontier, auto visited, auto distances, auto frontier_size) {
+            init_frontier_kernel<<<1, 1, 0, s>>>(
+                frontier, visited, distances, frontier_size, source_vertex,
+                world_size, world_rank);
   };
 
-  ctx.task(bfs_data.l_sent_vertices.write())->*[&](cudaStream_t s, auto sent_vertices) {
-    // Initialize sent_vertices to 0
-    CHECK(cudaMemsetAsync(sent_vertices.data_handle(), 0, graph.num_vertices * sizeof(int), s));
+  ctx.task(bfs_data.l_remote_vertices.write(), bfs_data.l_remote_counts.write(),
+           l_send_displs.write(), l_recv_counts.write(), l_recv_displs.write(),
+           l_send_counts.write())->*[&]
+           (cudaStream_t s, auto remote_vertices, auto remote_counts,
+            auto send_displs, auto recv_counts, auto recv_displs, auto send_counts) {
+            // Initialize sent_vertices to 0
+            CHECK(cudaMemsetAsync(remote_vertices.data_handle(), 0, graph.num_vertices * sizeof(vertex_t), s));
+            CHECK(cudaMemsetAsync(remote_counts.data_handle(), 0, world_size * sizeof(int), s));
+            CHECK(cudaMemsetAsync(send_displs.data_handle(), 0, world_size * sizeof(int), s));
+            CHECK(cudaMemsetAsync(recv_counts.data_handle(), 0, world_size * sizeof(int), s));
+            CHECK(cudaMemsetAsync(recv_displs.data_handle(), 0, world_size * sizeof(int), s));
+            CHECK(cudaMemsetAsync(send_counts.data_handle(), 0, world_size * sizeof(int), s));
   };
 
-  ctx.host_launch(l_global_frontier_sizes.write(), l_send_frontier_sizes.write())->*[&](
-    auto global_frontier_sizes, auto send_frontier_sizes) {
-    send_frontier_sizes(0) = 0;
-    for (int i = 0; i < world_size; i++) {
-      global_frontier_sizes(i) = 0;
-    }
+  ctx.task(l_total_send.write(), l_total_recv.write())->*[&](cudaStream_t s, auto total_send, auto total_recv) {
+    // Initialize with zeros
+    CHECK(cudaMemsetAsync(total_send.data_handle(), 0, sizeof(vertex_t), s));
+    CHECK(cudaMemsetAsync(total_recv.data_handle(), 0, sizeof(vertex_t), s));
   };
 
   cudaStreamSynchronize(ctx.task_fence());
@@ -342,298 +358,350 @@ int main(int argc, char* argv[]) {
   //! #################
 
   bool done = false;
-  vertex_t total_size = 0;
+  vertex_t next_f_size = 0;
 
-  ctx.repeat([&]() {return !done;})->*[&](context ctx, size_t) {
-
+  ctx.repeat([&]() { return !done; })->*[&](context ctx, size_t) {
     //* TIMING
     Timer level_timer;
     level_timer.start();
 
     // ##### PROCESS FRONTIER #####
-    ctx.task(
-      l_row_offsets.read(), 
-      l_column_indices.read(), 
-      bfs_data.l_frontier.read(), 
-      bfs_data.l_next_frontier.write(), 
-      bfs_data.l_visited.write(), 
-      bfs_data.l_distances.write(),
-      bfs_data.l_frontier_size.read(),
-      bfs_data.l_next_frontier_size.write(),
-      bfs_data.l_sent_vertices.rw())->*[&](
-        cudaStream_t s, 
-        auto row_offsets, 
-        auto column_indices, 
-        auto frontier, 
-        auto next_frontier, 
-        auto visited, 
-        auto distances,
-        auto frontier_size, 
-        auto next_frontier_size,
-        auto sent_vertices) {
-      process_frontier_kernel<<<256, 256, 0, s>>>(
-        row_offsets, column_indices, frontier, next_frontier, visited, distances, frontier_size, next_frontier_size, sent_vertices, world_rank, world_size, level);
+    ctx.task(l_row_offsets.read(), l_column_indices.read(),
+             bfs_data.l_frontier.read(), bfs_data.l_next_frontier.write(),
+             bfs_data.l_visited.write(), bfs_data.l_distances.write(),
+             bfs_data.l_frontier_size.read(),
+             bfs_data.l_next_frontier_size.write(),
+             bfs_data.l_remote_vertices.rw(), bfs_data.l_remote_counts.rw())
+            ->*[&](cudaStream_t s, auto row_offsets, auto column_indices,
+            auto frontier, auto next_frontier, auto visited, auto distances,
+            auto frontier_size, auto next_frontier_size, auto remote_vertices,
+            auto remote_counts) {
+          process_frontier_kernel<<<256, 256, 0, s>>>(
+              row_offsets, column_indices, frontier, next_frontier, visited,
+              distances, frontier_size, next_frontier_size, remote_vertices,
+              remote_counts, num_vertices, world_rank, world_size, level);
     };
 
-    // #### GATHER FRONTIER SIZES #### //
-    ctx.task(
-      bfs_data.l_next_frontier_size.read(), 
-      l_send_frontier_sizes.write(), 
-      l_global_frontier_sizes.write())->*[&](
-      cudaStream_t s, auto next_f_size, auto send_f_sizes, auto global_f_sizes) {
-      
-      copy_kernel<<<1, 1, 0, s>>>(next_f_size, send_f_sizes);
+    ctx.task(l_all_send_counts.write())
+      ->*[&](cudaStream_t s, auto all_send_counts) {
+        CHECK(cudaMemsetAsync(all_send_counts.data_handle(), 0,
+                              world_size * world_size * sizeof(int), s));
+    };
+    cudaStreamSynchronize(ctx.task_fence());
 
-      //* TIMING
-      Timer comm_timer;
-      comm_timer.start();
-      
-      // AllGather the frontier sizes using the stream from the task
-      NCCL_CHECK(ncclGroupStart());
-      NCCL_CHECK(ncclAllGather(
-          send_f_sizes.data_handle(),
-          d_recv_buffer, 
-          1, ncclUint32, comm, s));
-      NCCL_CHECK(ncclGroupEnd());
+    ctx.task(bfs_data.l_remote_counts.read(), l_all_send_counts.rw())
+      ->*[&](cudaStream_t s, auto remote_counts, auto all_send_counts) {
+          Timer comm_timer;
+          comm_timer.start();
 
-      //* TIMING
-      double comm_elapsed = comm_timer.elapsed();
-      perf.comm_time += comm_elapsed;
-      perf.level_comm_times.push_back(comm_elapsed);
-      
-      // Copy from temp buffer to logical data
-      copy_array_kernel<<<(world_size + 255)/256, 256, 0, s>>>(d_recv_buffer, global_f_sizes, world_size);
+          // Gather send counts from all ranks
+          NCCL_CHECK(ncclGroupStart());
+          NCCL_CHECK(ncclAllGather(remote_counts.data_handle(),
+                                    all_send_counts.data_handle(),
+                                    world_size, ncclInt, comm, s));
+          NCCL_CHECK(ncclGroupEnd());
+
+          double comm_elapsed = comm_timer.elapsed();
+          perf.comm_time += comm_elapsed;
+          perf.level_comm_times.push_back(comm_elapsed);
     };
 
-    // #### EXCHANGE FRONTIER VERTICES #### //
-    ctx.task(
-      bfs_data.l_next_frontier.read(), 
-      bfs_data.l_next_frontier_size.read(), 
-      bfs_data.l_visited.rw(), 
-      bfs_data.l_distances.rw(), 
-      bfs_data.l_frontier.rw(), 
-      bfs_data.l_frontier_size.rw())->*[&](
-        cudaStream_t s, 
-        auto next_frontier, 
-        auto next_frontier_size, 
-        auto visited, 
-        auto distances, 
-        auto frontier, 
-        auto frontier_size) {
-      
-      // Reset send counts
-      CHECK(cudaMemset(d_send_counts, 0, world_size * sizeof(int)));
+    // ctx.task(bfs_data.l_remote_counts.read(), l_send_counts.write())
+    //         ->*[&](cudaStream_t s, auto remote_counts, auto send_counts) {
+    //               // Copy the remote_counts to send_counts
+    //               CHECK(cudaMemcpyAsync(
+    //                   send_counts.data_handle(), remote_counts.data_handle(),
+    //                   world_size * sizeof(int), cudaMemcpyDeviceToDevice, s));
+    //             };
+    
+    cudaStreamSynchronize(ctx.task_fence());
 
-      // Count vertices to send
-      count_by_destination_kernel<<<256, 256, 0, s>>>(next_frontier, next_frontier_size, d_send_counts, world_size);
+    // ctx.host_launch(bfs_data.l_remote_counts.read(), l_all_send_counts.read(), bfs_data.l_next_frontier_size.read())
+    //   ->*[&](auto send_counts, auto all_send_counts, auto next_frontier_size) {
+    //         printf("Rank %d: Local send counts: ", world_rank);
+    //         for (int i = 0; i < world_size; i++) {
+    //           printf("%d ", send_counts(i));
+    //         }
+    //         printf("\n");
 
-      //* TIMING
+    //         printf("Rank %d: All send counts matrix:\n", world_rank);
+    //         for (int i = 0; i < world_size; i++) {
+    //           printf("  Row %d: ", i);
+    //           for (int j = 0; j < world_size; j++) {
+    //             printf("%d ", all_send_counts(i * world_size + j));
+    //           }
+    //           printf("\n");
+    //         }
+
+    //         // print next frontier size
+    //         printf("Rank %d: Next frontier size: %d\n", world_rank,
+    //                 next_frontier_size(0));
+    // };
+
+    // calc displacements
+    ctx.task(l_all_send_counts.read(), l_recv_counts.rw())
+            ->*[&](cudaStream_t s, auto all_send_counts, auto recv_counts) {
+                  extract_recv_counts_kernel<<<1, 1, 0, s>>>(
+                      all_send_counts, recv_counts, world_rank, world_size);
+    };
+
+    ctx.task(bfs_data.l_remote_counts.read(), l_recv_counts.read(),
+            l_send_displs.rw(), l_recv_displs.rw(), l_total_send.rw(),
+            l_total_recv.rw())->*[&](cudaStream_t s, auto remote_counts, auto recv_counts,
+            auto send_displs, auto recv_displs, auto total_send, auto total_recv) {
+              calc_displacements_kernel<<<1, 1, 0, s>>>(
+                  remote_counts, recv_counts, send_displs, recv_displs, total_send, total_recv,  world_size);
+    };
+
+
+    ctx.task(l_total_send.read(), l_total_recv.read())->*[&](cudaStream_t s, auto t_send, auto t_recv) {
+      CHECK(cudaMemcpyAsync(&total_send, t_send.data_handle(),
+                            sizeof(vertex_t), cudaMemcpyDeviceToHost));
+      CHECK(cudaMemcpyAsync(&total_recv, t_recv.data_handle(),
+                            sizeof(vertex_t), cudaMemcpyDeviceToHost));
+    };
+
+    // cudaStreamSynchronize(ctx.task_fence());
+
+    total_send = std::max<vertex_t>(1, total_send);
+    total_recv = std::max<vertex_t>(1, total_recv);
+
+    l_send_buffer = ctx.logical_data(shape_of<slice<vertex_t>>(total_send));
+    l_recv_buffer = ctx.logical_data(shape_of<slice<vertex_t>>(total_recv));
+
+    // cudaStreamSynchronize(ctx.task_fence());
+
+    ctx.task(l_send_buffer.write(), l_recv_buffer.write())->*[&](cudaStream_t s, auto send_buffer, auto recv_buffer) {
+      if (total_send > 1) CHECK(cudaMemsetAsync(send_buffer.data_handle(), 0, total_send * sizeof(vertex_t), s));
+      if (total_recv > 1) CHECK(cudaMemsetAsync(recv_buffer.data_handle(), 0, total_recv * sizeof(vertex_t), s));
+    };
+
+    // cudaStreamSynchronize(ctx.task_fence());
+
+    ctx.task(bfs_data.l_remote_vertices.read(), bfs_data.l_remote_counts.read(),
+            l_send_buffer.rw(), l_send_counts.read(), l_send_displs.read())->*[&]
+            (cudaStream_t s, auto remote_vertices, auto remote_counts,
+          auto send_buffer, auto send_counts, auto send_displs) {
+        if (total_send > 1) {
+          sort_by_destination_kernel<<<256, 256, 0, s>>>(
+              remote_vertices, remote_counts, send_buffer, send_counts,
+              send_displs, num_vertices, world_size);
+        }
+    };
+
+    // host launch to print buffers
+    // ctx.host_launch(l_send_counts.read(), l_recv_counts.read(),
+    //                 l_send_displs.read(), l_recv_displs.read(),
+    //                 l_all_send_counts.rw(), l_send_buffer.rw(),
+    //                 l_recv_buffer.rw())->*[&](auto send_counts, auto recv_counts,
+    //         auto send_displs, auto recv_displs, auto all_send_counts,
+    //         auto send_buffer, auto recv_buffer) {
+    //   // Print buffers
+    //   printf("Rank %d, Level %d: Send Counts: ", world_rank, level);
+    //   for (int i = 0; i < world_size; i++) {
+    //     printf("%d ", send_counts(i));
+    //   }
+    //   printf("\n");
+    //   printf("Rank %d, Level %d: Recv Counts: ", world_rank, level);
+    //   for (int i = 0; i < world_size; i++) {
+    //     printf("%d ", recv_counts(i));
+    //   }
+    //   printf("\n");
+    // };
+
+    ctx.task(bfs_data.l_remote_counts.rw(), l_recv_counts.rw(), l_send_displs.rw(),
+             l_recv_displs.rw(), l_all_send_counts.rw(), l_send_buffer.rw(),
+             l_recv_buffer.rw())->*[&](cudaStream_t s, auto send_counts,
+            auto recv_counts, auto send_displs, auto recv_displs,
+            auto all_send_counts, auto send_buffer, auto recv_buffer) {
       Timer comm_timer;
       comm_timer.start();
 
-      //! NO CUDA AWARE MPI ON BIGRED200 :(
+      // Get raw device pointers
+      int* d_send_counts = send_counts.data_handle();
+      int* d_recv_counts = recv_counts.data_handle();
+      int* d_send_displs = send_displs.data_handle();
+      int* d_recv_displs = recv_displs.data_handle();
 
-      // transfer counts to host
-      int* h_send_counts = new int[world_size];
-      CHECK(cudaMemcpy(h_send_counts, d_send_counts, world_size * sizeof(int), cudaMemcpyDeviceToHost));
+      // Create host arrays
+      int h_send_counts[world_size];
+      int h_recv_counts[world_size];
+      int h_send_displs[world_size];
+      int h_recv_displs[world_size];
+      int h_temp_all_counts[world_size * world_size];
 
-      // exchange send counts and get recv counts
-      int* h_recv_counts = new int[world_size];
-      MPI_CHECK(MPI_Alltoall(h_send_counts, 1, MPI_INT, h_recv_counts, 1, MPI_INT, MPI_COMM_WORLD));
+      CHECK(cudaMemcpy(h_send_counts, d_send_counts, world_size * sizeof(int),
+                       cudaMemcpyDeviceToHost));
+      CHECK(cudaMemcpy(h_recv_counts, d_recv_counts, world_size * sizeof(int),
+                       cudaMemcpyDeviceToHost));
+      CHECK(cudaMemcpy(h_send_displs, d_send_displs, world_size * sizeof(int),
+                       cudaMemcpyDeviceToHost));
+      CHECK(cudaMemcpy(h_recv_displs, d_recv_displs, world_size * sizeof(int),
+                       cudaMemcpyDeviceToHost));
+      CHECK(cudaMemcpy(h_temp_all_counts, all_send_counts.data_handle(),
+                       world_size * world_size * sizeof(int),
+                       cudaMemcpyDeviceToHost));
 
-      //* TIMING
-      double comm_elapsed = comm_timer.elapsed();
-      perf.comm_time += comm_elapsed;
-      perf.level_comm_times.push_back(comm_elapsed);
-
-      // calc send/recv displacements
-      int* h_send_displs = new int[world_size];
-      int* h_recv_displs = new int[world_size];
-      h_send_displs[0] = 0;
-      h_recv_displs[0] = 0;
-
-      for (int i = 1; i < world_size; i++) {
-        h_send_displs[i] = h_send_displs[i - 1] + h_send_counts[i - 1];
-        h_recv_displs[i] = h_recv_displs[i - 1] + h_recv_counts[i - 1];
+      for (int i = 0; i < world_size; i++) {
+        h_recv_counts[i] = h_temp_all_counts[i * world_size + world_rank];
       }
 
-      // calc total vertices to recieve
-      int total_send = h_send_displs[world_size - 1] + h_send_counts[world_size - 1];
-      int total_recv = h_recv_displs[world_size - 1] + h_recv_counts[world_size - 1];
+      NCCL_CHECK(ncclGroupStart());
+      for (int i = 0; i < world_size; i++) {
+        if (i != world_rank) {
+          if (h_send_counts[i] > 0) {
+            NCCL_CHECK(ncclSend(send_buffer.data_handle() + h_send_displs[i],
+                                h_send_counts[i], ncclUint32, i, comm, s));
+          }
+          if (h_recv_counts[i] > 0) {
+            NCCL_CHECK(ncclRecv(recv_buffer.data_handle() + h_recv_displs[i],
+                                h_recv_counts[i], ncclUint32, i, comm, s));
+          }
+        }
+      }
+      NCCL_CHECK(ncclGroupEnd());
 
-      // displacements to device
-      CHECK(cudaMemcpy(d_send_displs, h_send_displs, world_size * sizeof(int), cudaMemcpyHostToDevice));
-
-      vertex_t* d_send_buffer;
-      CHECK(cudaMalloc(&d_send_buffer, total_send * sizeof(vertex_t)));
-
-      // sort vertices into send buffer
-      sort_by_destination_kernel<<<256, 256, 0, s>>>(next_frontier, next_frontier_size, d_send_buffer, d_send_counts, d_send_displs, world_size);
-    
-      // allocate recv buffer
-      vertex_t* d_recv_buff;
-      CHECK(cudaMalloc(&d_recv_buff, total_recv * sizeof(vertex_t)));
-
-      // copy send buffer to host
-      vertex_t* h_send_buffer;
-      vertex_t* h_recv_buffer;
-      CHECK(cudaMallocHost(&h_send_buffer, total_send * sizeof(vertex_t)));
-      CHECK(cudaMallocHost(&h_recv_buffer, total_recv * sizeof(vertex_t)));
-
-      //* TIMING
-      comm_timer.start();
-
-      CHECK(cudaMemcpy(h_send_buffer, d_send_buffer, total_send * sizeof(vertex_t), cudaMemcpyDeviceToHost));
-
-      // exchange send buffers of vertices
-      MPI_CHECK(MPI_Alltoallv(h_send_buffer, h_send_counts, h_send_displs, MPI_UINT32_T,
-                    h_recv_buffer, h_recv_counts, h_recv_displs, MPI_UINT32_T, MPI_COMM_WORLD));
-
-      // copy recv buffer to device
-      CHECK(cudaMemcpy(d_recv_buff, h_recv_buffer, total_recv * sizeof(vertex_t), cudaMemcpyHostToDevice));
-
-      //* TIMING
-      comm_elapsed = comm_timer.elapsed();
+      double comm_elapsed = comm_timer.elapsed();
       perf.comm_time += comm_elapsed;
       perf.level_comm_times.push_back(comm_elapsed);
-
-      // process received vertices
-      filter_received_vertices_kernel<<<256, 256, 0, s>>>(
-          d_recv_buff, total_recv, visited,
-          distances, frontier,
-          frontier_size, level + 1, world_rank,
-          world_size);
-
-      // Cleanup
-      CHECK(cudaFree(d_send_buffer));
-      CHECK(cudaFree(d_recv_buff));
-      CHECK(cudaFreeHost(h_send_buffer));
-      CHECK(cudaFreeHost(h_recv_buffer));
-      delete[] h_send_counts;
-      delete[] h_recv_counts;
-      delete[] h_send_displs;
-      delete[] h_recv_displs;
     };
 
-    // #### RESET NEXT FRONTIER SIZE #### //
-    ctx.task(bfs_data.l_next_frontier_size.rw())->*[&](cudaStream_t s, auto next_frontier_size) {
-      // Reset next frontier size for next iteration
-      CHECK(cudaMemsetAsync(next_frontier_size.data_handle(), 0, sizeof(vertex_t), s));
+    ctx.task(l_recv_buffer.read(), l_total_recv.read(), bfs_data.l_visited.rw(),
+             bfs_data.l_distances.rw(), bfs_data.l_next_frontier.rw(),
+             bfs_data.l_next_frontier_size.rw())->*
+            [&](cudaStream_t s, auto recv_buffer, auto t_recv, auto visited,
+            auto distances, auto next_frontier, auto next_frontier_size) 
+    {
+      if (total_recv > 1) {
+        filter_received_vertices_kernel<<<256, 256, 0, s>>>(
+            recv_buffer, t_recv, visited, distances, next_frontier,
+            next_frontier_size, level, num_vertices, world_rank, world_size);
+      }
     };
 
-    // #### RESET SENT VERTICES FOR INTERNAL VERTICES #### //
-    ctx.task(bfs_data.l_sent_vertices.rw())->*[&](cudaStream_t s, auto sent_vertices) {
-      mark_local_vertices_kernel<<<256, 256, 0, s>>>(
-        sent_vertices, world_rank, world_size, graph.num_vertices - 1);
-      
-      // This resolves the issue without full reset
-      if (world_rank == 0 && level % 5 == 0)
-        printf("Marking local vertices as available at level %d\n", level);
+
+    ctx.task(bfs_data.l_next_frontier_size.read())->*[&](cudaStream_t s, auto next_frontier_size) {
+      CHECK(cudaMemcpy(&next_f_size,  
+                      next_frontier_size.data_handle(),
+                      sizeof(vertex_t), cudaMemcpyDeviceToHost));
     };
 
-    // #### CHECK FOR TERMINATION #### //
-    ctx.host_launch(l_global_frontier_sizes.read())->*
-      [&](auto global_frontier_sizes) {
-        
+    cudaStreamSynchronize(ctx.task_fence());
+
+    ctx.task(bfs_data.l_remote_counts.write())->*[&](cudaStream_t s, auto remote_counts) {
+      CHECK(cudaMemsetAsync(remote_counts.data_handle(), 0, world_size * sizeof(int), s));
+    };
+
+    ctx.host_launch(bfs_data.l_next_frontier_size.rw(),
+                    bfs_data.l_frontier.rw(), bfs_data.l_next_frontier.rw(),
+                    bfs_data.l_frontier_size.rw())->*[&](auto next_frontier_size, 
+                    auto frontier, auto next_frontier,auto frontier_size) 
+    {
+      vertex_t global_next_frontier_size = 0;
+      MPI_CHECK(MPI_Allreduce(
+          &next_f_size, &global_next_frontier_size, 1,
+          MPI_UINT32_T, MPI_SUM, MPI_COMM_WORLD));
+
+      done = (global_next_frontier_size == 0);
+
+      if (!done) {
         level++;
-
-        if (level > 30) {
-          done = true;
-          if (world_rank == 0) {
-            printf("WARNING: Terminated at maximum level limit (30)\n");
-          }
-          return;
-        }
-
-        vertex_t sum = 0;
-        for (int i = 0; i < world_size; i++) {
-          sum += global_frontier_sizes(i);
-        }
-        total_size = sum;
-        done = (sum == 0);
-
+      }
     };
+
+    cudaStreamSynchronize(ctx.task_fence());
+
+    if (!done) {
+      ctx.task(bfs_data.l_frontier.rw(), bfs_data.l_next_frontier.rw(),
+          bfs_data.l_frontier_size.rw(), bfs_data.l_next_frontier_size.rw())
+        ->*[&](cudaStream_t s, auto frontier, auto next_frontier,
+              auto frontier_size, auto next_frontier_size) {
+          swap_frontiers_kernel<<<256, 256, 0, s>>>(
+              next_frontier, frontier, next_frontier_size, frontier_size);
+      };
+
+      ctx.task(bfs_data.l_next_frontier_size.write())->*[&](cudaStream_t s, auto next_frontier_size) {
+        CHECK(cudaMemsetAsync(next_frontier_size.data_handle(), 0, sizeof(vertex_t), s));
+      };
+    }
 
     //* TIMING
     perf.level_times.push_back(level_timer.elapsed());
-
   };
 
   //* TIMING
   perf.bfs_time = bfs_timer.elapsed();
   perf.total_time = total_timer.elapsed();
 
-  CHECK(cudaFree(d_send_counts));
-  CHECK(cudaFree(d_send_displs));
-  CHECK(cudaFree(d_recv_buffer));
-
   cudaStreamSynchronize(ctx.task_fence());
 
   // -------- BFS Statistics --------
-  ctx.host_launch(bfs_data.l_visited.read(), bfs_data.l_distances.read())->*
-    [&](auto visited, auto distances) {
-      // Count visited vertices
-      int local_visited = 0;
-      int max_distance = -1;
-      long long sum_distances = 0;
+  ctx.host_launch(bfs_data.l_visited.read(), bfs_data.l_distances.read())
+          ->*
+      [&](auto visited, auto distances) {
+        // Count visited vertices
+        int local_visited = 0;
+        int max_distance = -1;
+        long long sum_distances = 0;
 
-      for (int i = 0; i < num_vertices; i++) {
-        if (visited(i) > 0) {
-          local_visited++;
-          max_distance = std::max(max_distance, distances(i));
-          sum_distances += distances(i);
+        for (int i = 0; i < num_vertices; i++) {
+          if (visited(i) > 0) {
+            local_visited++;
+            max_distance = std::max(max_distance, distances(i));
+            sum_distances += distances(i);
+          }
         }
-      }
 
-      // Gather global statistics
-      int global_visited = 0;
-      int global_max_distance = 0;
-      long long global_sum_distances = 0;
+        // Gather global statistics
+        int global_visited = 0;
+        int global_max_distance = 0;
+        long long global_sum_distances = 0;
 
-      MPI_CHECK(MPI_Reduce(&local_visited, &global_visited, 1, MPI_INT, MPI_SUM, 0,
-                  MPI_COMM_WORLD));
-      MPI_CHECK(MPI_Reduce(&max_distance, &global_max_distance, 1, MPI_INT, MPI_MAX, 0,
-                  MPI_COMM_WORLD));
-      MPI_CHECK(MPI_Reduce(&sum_distances, &global_sum_distances, 1, MPI_LONG_LONG,
-                  MPI_SUM, 0, MPI_COMM_WORLD));
+        MPI_CHECK(MPI_Reduce(&local_visited, &global_visited, 1, MPI_INT,
+                             MPI_SUM, 0, MPI_COMM_WORLD));
+        MPI_CHECK(MPI_Reduce(&max_distance, &global_max_distance, 1, MPI_INT,
+                             MPI_MAX, 0, MPI_COMM_WORLD));
+        MPI_CHECK(MPI_Reduce(&sum_distances, &global_sum_distances, 1,
+                             MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD));
 
-      // Collect per-level statistics
-      std::vector<int> local_level_counts(level + 1, 0);
-      for (int i = 0; i < num_vertices; i++) {
-        if (visited(i) > 0 && distances(i) >= 0 && distances(i) <= level) {
-          local_level_counts[distances(i)]++;
+        // Collect per-level statistics
+        std::vector<int> local_level_counts(level + 1, 0);
+        for (int i = 0; i < num_vertices; i++) {
+          if (visited(i) > 0 && distances(i) >= 0 && distances(i) <= level) {
+            local_level_counts[distances(i)]++;
+          }
         }
-      }
 
-      std::vector<int> global_level_counts(level + 1, 0);
-      MPI_CHECK(MPI_Reduce(local_level_counts.data(), global_level_counts.data(),
-                  level + 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD));
+        std::vector<int> global_level_counts(level + 1, 0);
+        MPI_CHECK(MPI_Reduce(local_level_counts.data(),
+                             global_level_counts.data(), level + 1, MPI_INT,
+                             MPI_SUM, 0, MPI_COMM_WORLD));
 
-      // Print results
-      if (world_rank == 0) {
-        double avg_distance =
-            global_visited > 0 ? (double)global_sum_distances / global_visited
-                                : 0;
+        // Print results
+        if (world_rank == 0) {
+          double avg_distance =
+              global_visited > 0 ? (double)global_sum_distances / global_visited
+                                 : 0;
 
-        double visit_percent = 100.0 * global_visited / (graph.num_vertices);
+          double visit_percent = 100.0 * global_visited / (graph.num_vertices);
 
-        printf("\n===== BFS Statistics =====\n");
-        printf("Source vertex: %u\n", source_vertex);
-        printf("Visited vertices: %d (%.2f%% of graph)\n", global_visited,
-                visit_percent);
-        printf("Maximum distance from source: %d\n", global_max_distance);
-        printf("Average distance from source: %.2f\n", avg_distance);
+          printf("\n===== BFS Statistics =====\n");
+          printf("Source vertex: %u\n", source_vertex);
+          printf("Visited vertices: %d (%.2f%% of graph)\n", global_visited,
+                 visit_percent);
+          printf("Maximum distance from source: %d\n", global_max_distance);
+          printf("Average distance from source: %.2f\n", avg_distance);
 
-        printf("\nVertices discovered per level:\n");
-        printf("Level | Count   | Percent\n");
-        printf("---------------------------\n");
-        for (int i = 0; i <= global_max_distance; i++) {
-          printf("%-5d | %-7d | %.2f%%\n", i, global_level_counts[i],
-                  (double)global_level_counts[i] * 100 / global_visited);
+          printf("\nVertices discovered per level:\n");
+          printf("Level | Count   | Percent\n");
+          printf("---------------------------\n");
+          for (int i = 0; i <= global_max_distance; i++) {
+            printf("%-5d | %-7d | %.2f%%\n", i, global_level_counts[i],
+                   (double)global_level_counts[i] * 100 / global_visited);
+          }
+          printf("===========================\n\n");
         }
-        printf("===========================\n\n");
-      }
-  };
+      };
 
   //! End of BFS Loop
 
@@ -645,10 +713,14 @@ int main(int argc, char* argv[]) {
   double max_bfs_time = 0;
   double sum_comm_time = 0;
 
-  MPI_CHECK(MPI_Reduce(&perf.total_time, &max_total_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD));
-  MPI_CHECK(MPI_Reduce(&perf.init_time, &max_init_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD));
-  MPI_CHECK(MPI_Reduce(&perf.bfs_time, &max_bfs_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD));
-  MPI_CHECK(MPI_Reduce(&perf.comm_time, &sum_comm_time, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD));
+  MPI_CHECK(MPI_Reduce(&perf.total_time, &max_total_time, 1, MPI_DOUBLE,
+                       MPI_MAX, 0, MPI_COMM_WORLD));
+  MPI_CHECK(MPI_Reduce(&perf.init_time, &max_init_time, 1, MPI_DOUBLE, MPI_MAX,
+                       0, MPI_COMM_WORLD));
+  MPI_CHECK(MPI_Reduce(&perf.bfs_time, &max_bfs_time, 1, MPI_DOUBLE, MPI_MAX, 0,
+                       MPI_COMM_WORLD));
+  MPI_CHECK(MPI_Reduce(&perf.comm_time, &sum_comm_time, 1, MPI_DOUBLE, MPI_SUM,
+                       0, MPI_COMM_WORLD));
 
   if (world_rank == 0) {
     double avg_comm_time = sum_comm_time / world_size;
