@@ -75,6 +75,50 @@ plt.tight_layout()
 plt.savefig(os.path.join(PLOT_DIR, 'scaling_vertices.png'))
 plt.close()
 
+# --------------- Average Time per Level vs Graph Size (Edges) ---------------
+plt.figure(figsize=(12, 6))
+
+# Plot for each implementation
+for impl in implementations:
+    impl_df = df[df['implementation'] == impl].sort_values('total_edges')
+    plt.plot(impl_df['total_edges'], impl_df['avg_time_per_level'], 
+             marker=impl_markers.get(impl, 'o'),
+             color=impl_colors.get(impl, 'blue'),
+             label=impl)
+
+plt.xlabel('Graph Size (Number of Edges)')
+plt.ylabel('Average Time per Level (seconds)')
+plt.title('Average Time per BFS Level vs Number of Edges')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.xscale('log')  # Log scale for better visualization of range
+plt.yscale('log')
+plt.tight_layout()
+plt.savefig(os.path.join(PLOT_DIR, 'avg_time_per_level_edges.png'))
+plt.close()
+
+# --------------- Average Time per Level vs Graph Size (Vertices) ---------------
+plt.figure(figsize=(12, 6))
+
+# Plot for each implementation
+for impl in implementations:
+    impl_df = df[df['implementation'] == impl].sort_values('total_vertices')
+    plt.plot(impl_df['total_vertices'], impl_df['avg_time_per_level'], 
+             marker=impl_markers.get(impl, 'o'),
+             color=impl_colors.get(impl, 'blue'),
+             label=impl)
+
+plt.xlabel('Graph Size (Number of Vertices)')
+plt.ylabel('Average Time per Level (seconds)')
+plt.title('Average Time per BFS Level vs Number of Vertices')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.xscale('log')  # Log scale for better visualization of range
+plt.yscale('log')
+plt.tight_layout()
+plt.savefig(os.path.join(PLOT_DIR, 'avg_time_per_level_vertices.png'))
+plt.close()
+
 # --------------- Computation vs Communication Times ---------------
 fig, ax = plt.subplots(figsize=(12, 9))
 
@@ -255,3 +299,59 @@ plt.savefig(os.path.join(PLOT_DIR, 'comm_comp_ratio.png'))
 plt.close()
 
 print(f"Plots saved to {PLOT_DIR}")
+
+# --------------- Distances from Source Comparison (Summary Graph) ---------------
+plt.figure(figsize=(14, 7))
+
+# First, standardize dataset names to ensure consistency
+df['std_dataset'] = df['dataset'].apply(lambda x: x.strip().lower())
+std_datasets = sorted(df['std_dataset'].unique())
+
+# For visual clarity, create a grouped bar chart
+n_datasets = len(std_datasets)
+n_implementations = len(implementations)
+bar_width = 0.7 / n_implementations
+x = np.arange(n_datasets)
+
+# Create a mapping for prettier dataset display names
+display_names = []
+for std_dataset in std_datasets:
+    # Get any instance of the dataset to extract the original name
+    orig_name = df[df['std_dataset'] == std_dataset]['dataset'].iloc[0]
+    display_names.append(simplify_dataset_name(orig_name))
+
+# Plot one bar per implementation for each dataset
+for i, impl in enumerate(implementations):
+    avg_distances = []
+    for std_dataset in std_datasets:
+        # Find this implementation for this standardized dataset
+        impl_df = df[(df['implementation'] == impl) & (df['std_dataset'] == std_dataset)]
+        
+        # Use avg_distance if available, otherwise fallback to 0
+        if 'avg_distance' in df.columns and len(impl_df) > 0 and not pd.isna(impl_df['avg_distance'].iloc[0]):
+            avg_distances.append(impl_df['avg_distance'].iloc[0])
+        else:
+            # Check if we need to use max_distance instead
+            if 'max_distance' in df.columns and len(impl_df) > 0 and not pd.isna(impl_df['max_distance'].iloc[0]):
+                avg_distances.append(impl_df['max_distance'].iloc[0])
+            else:
+                avg_distances.append(0)  # Placeholder if no distance data
+    
+    # Position bars side by side within each dataset group
+    plt.bar(x + (i - n_implementations/2 + 0.5) * bar_width, 
+            avg_distances, 
+            width=bar_width, 
+            label=impl,
+            color=impl_colors.get(impl, 'blue'),
+            alpha=0.8)
+
+# Add labels, title and customize the plot
+plt.xlabel('Dataset', fontsize=12)
+plt.ylabel('Average Distance from Source', fontsize=12)
+plt.title('Average BFS Distances from Source Across Implementations', fontsize=14)
+plt.xticks(x, display_names, rotation=45, ha='right')
+plt.legend(title="Implementation")
+plt.grid(True, alpha=0.3, axis='y')
+plt.tight_layout()
+plt.savefig(os.path.join(PLOT_DIR, 'avg_distances_summary.png'))
+plt.close()
