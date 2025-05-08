@@ -7,8 +7,8 @@ from pathlib import Path
 def extract_dataset_name(filename):
     """Extract dataset name from the filename."""
     base = os.path.basename(filename)
-    # Remove the _cpu.out or _gpu.out suffix
-    match = re.match(r'(.+?)_(cpu|gpu)\.out', base)
+    # Remove the _cpu.out, _gpu.out, or _gpu_stf.out suffix
+    match = re.match(r'(.+?)_(cpu|gpu|gpu_stf)\.out', base)
     if match:
         return match.group(1)
     return base
@@ -110,8 +110,13 @@ def process_output_file(filepath):
     with open(filepath, 'r') as f:
         content = f.read()
     
-    # Determine if it's CPU or GPU
-    implementation = "CPU" if "_cpu.out" in filepath else "GPU"
+    # Determine if it's CPU, GPU, or GPU_STF
+    if "_cpu.out" in filepath:
+        implementation = "CPU"
+    elif "_gpu_stf.out" in filepath:
+        implementation = "GPU_STF"
+    else:
+        implementation = "GPU"
     
     # Extract dataset name
     dataset = extract_dataset_name(filepath)
@@ -138,7 +143,11 @@ def process_output_file(filepath):
 def main():
     # Find all output files
     output_dir = os.path.join(os.path.dirname(__file__), 'output')
-    output_files = glob.glob(os.path.join(output_dir, '*_cpu.out')) + glob.glob(os.path.join(output_dir, '*_gpu.out'))
+    output_files = (
+        glob.glob(os.path.join(output_dir, '*_cpu.out')) + 
+        glob.glob(os.path.join(output_dir, '*_gpu.out')) + 
+        glob.glob(os.path.join(output_dir, '*_gpu_stf.out'))
+    )
     
     if not output_files:
         print(f"No output files found in {output_dir}")

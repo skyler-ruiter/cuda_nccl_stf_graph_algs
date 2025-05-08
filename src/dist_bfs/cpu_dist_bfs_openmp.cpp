@@ -1,4 +1,5 @@
 #include <mpi.h>
+#include <omp.h>  // Add OpenMP header
 #include <sys/time.h>
 
 #include <algorithm>
@@ -152,6 +153,12 @@ int main(int argc, char* argv[]) {
   MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &world_size));
   MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &world_rank));
 
+  // Get number of available threads for OpenMP
+  int num_threads = omp_get_max_threads();
+  if (world_rank == 0) {
+    printf("Using OpenMP with %d threads per MPI rank\n", num_threads);
+  }
+
   Timer total_timer;
   BFSPerformance perf;
   total_timer.start();
@@ -222,54 +229,100 @@ int main(int argc, char* argv[]) {
     Timer level_timer;
     level_timer.start();
 
-    // Process current frontier
+    // Process current frontier - parallelize with OpenMP
     next_frontier.clear();
-    for (vertex_t v : frontier) {
-      // Only process if this vertex belongs to me
-      if (v % world_size == world_rank) {
-        vertex_t local_v = v / world_size;
-        vertex_t start = graph.row_offsets[local_v];
-        vertex_t end = graph.row_offsets[local_v + 1];
 
-        for (vertex_t i = start; i < end; i++) {
-          vertex_t neighbor = graph.col_indices[i];
+    // Use a thread-local container to avoid contention
+    std::vector<std::vector<vertex_t>> thread_next_frontiers(num_threads);
 
-          // Check if neighbor belongs to this process
-          if (neighbor % world_size == world_rank) {
-            vertex_t local_neighbor = neighbor / world_size;
-            if (!visited[local_neighbor]) {
-              visited[local_neighbor] = 1;
-              distances[local_neighbor] = level + 1;
-              next_frontier.push_back(neighbor);
-            }
-          } else {
-            // Send to other process - this vertex belongs to another rank
-            int dest_rank = neighbor % world_size;
-            if (sent_vertices_by_rank[dest_rank].find(neighbor) == sent_vertices_by_rank[dest_rank].end()) {
-              sent_vertices_by_rank[dest_rank].insert(neighbor);
-              next_frontier.push_back(neighbor);
+#pragma omp parallel
+    {
+      int thread_id = omp_get_thread_num();
+      auto& local_next = thread_next_frontiers[thread_id];
+
+#pragma omp for schedule(dynamic, 64)
+      for (size_t f = 0; f < frontier.size(); f++) {
+        vertex_t v = frontier[f];
+        // Only process if this vertex belongs to me
+        if (v % world_size == world_rank) {
+          vertex_t local_v = v / world_size;
+          vertex_t start = graph.row_offsets[local_v];
+          vertex_t end = graph.row_offsets[local_v + 1];
+
+          for (vertex_t i = start; i < end; i++) {
+            vertex_t neighbor = graph.col_indices[i];
+
+            // Check if neighbor belongs to this process
+            if (neighbor % world_size == world_rank) {
+              vertex_t local_neighbor = neighbor / world_size;
+
+              // Use atomic update to avoid race conditions
+              bool was_visited;
+#pragma omp atomic capture
+              {
+                was_visited = visited[local_neighbor];
+                visited[local_neighbor] = 1;
+              }
+
+              if (!was_visited) {
+                distances[local_neighbor] = level + 1;
+                local_next.push_back(neighbor);
+              }
+            } else {
+              // Send to other process - use thread-local tracking
+              int dest_rank = neighbor % world_size;
+              bool should_send = false;
+
+#pragma omp critical(sent_vertices_update)
+              {
+                if (sent_vertices_by_rank[dest_rank].find(neighbor) ==
+                    sent_vertices_by_rank[dest_rank].end()) {
+                  sent_vertices_by_rank[dest_rank].insert(neighbor);
+                  should_send = true;
+                }
+              }
+
+              if (should_send) {
+                local_next.push_back(neighbor);
+              }
             }
           }
         }
       }
     }
 
-    // Separate local and remote vertices in next_frontier
+    // Combine thread-local results
+    for (auto& thread_frontier : thread_next_frontiers) {
+      next_frontier.insert(next_frontier.end(), thread_frontier.begin(),
+                           thread_frontier.end());
+    }
+
+    // Separate local and remote vertices in next_frontier - can be parallelized
     std::vector<vertex_t> local_next_frontier;
     std::vector<vertex_t> remote_next_frontier;
-    
-    for (vertex_t v : next_frontier) {
-      if (v % world_size == world_rank) {
-        local_next_frontier.push_back(v);
-      } else {
-        remote_next_frontier.push_back(v);
+
+#pragma omp parallel
+    {
+      std::vector<vertex_t> thr_local, thr_remote;
+
+#pragma omp for schedule(static)
+      for (size_t i = 0; i < next_frontier.size(); i++) {
+        vertex_t v = next_frontier[i];
+        if (v % world_size == world_rank) {
+          thr_local.push_back(v);
+        } else {
+          thr_remote.push_back(v);
+        }
+      }
+
+#pragma omp critical(combine_frontiers)
+      {
+        local_next_frontier.insert(local_next_frontier.end(), thr_local.begin(),
+                                   thr_local.end());
+        remote_next_frontier.insert(remote_next_frontier.end(),
+                                    thr_remote.begin(), thr_remote.end());
       }
     }
-    
-    // if (world_rank == 0) {
-    //   printf("Level %d: Local next frontier size: %lu, Remote next frontier size: %lu\n", 
-    //          level, local_next_frontier.size(), remote_next_frontier.size());
-    // }
 
     // Exchange frontier size
     int local_size = remote_next_frontier.size();
@@ -337,24 +390,47 @@ int main(int argc, char* argv[]) {
     perf.comm_time += comm_elapsed;
     perf.level_comm_times.push_back(comm_elapsed);
 
-    // Process received vertices
+    // Process received vertices - parallelize this too
     frontier.clear();
 
-    for (vertex_t v : local_next_frontier) {
-      frontier.push_back(v);
-    }
+    // Add local vertices to frontier first
+    frontier.insert(frontier.end(), local_next_frontier.begin(),
+                    local_next_frontier.end());
 
-    for (int i = 0; i < total_recv; i++) {
-      vertex_t v = recv_buffer[i];
-      // Process only if it belongs to me
-      if (v % world_size == world_rank) {
-        vertex_t local_v = v / world_size;
-        if (!visited[local_v]) {
-          visited[local_v] = 1;
-          distances[local_v] = level + 1;
-          frontier.push_back(v);
+    // Use thread-local storage for received vertices
+    std::vector<std::vector<vertex_t>> thread_frontiers(num_threads);
+
+#pragma omp parallel
+    {
+      int thread_id = omp_get_thread_num();
+      auto& thread_frontier = thread_frontiers[thread_id];
+
+#pragma omp for schedule(dynamic, 64)
+      for (int i = 0; i < total_recv; i++) {
+        vertex_t v = recv_buffer[i];
+        // Process only if it belongs to me
+        if (v % world_size == world_rank) {
+          vertex_t local_v = v / world_size;
+
+          bool was_visited;
+#pragma omp atomic capture
+          {
+            was_visited = visited[local_v];
+            visited[local_v] = 1;
+          }
+
+          if (!was_visited) {
+            distances[local_v] = level + 1;
+            thread_frontier.push_back(v);
+          }
         }
       }
+    }
+
+    // Combine thread-local frontiers
+    for (auto& thread_frontier : thread_frontiers) {
+      frontier.insert(frontier.end(), thread_frontier.begin(),
+                      thread_frontier.end());
     }
 
     // Reset sent vertices for next iteration
@@ -362,11 +438,19 @@ int main(int argc, char* argv[]) {
       sent_set.clear();
     }
 
+    // More accurate timers - make sure to track all MPI operations
+    Timer termination_timer;
+    termination_timer.start();
+
     // Check termination condition
     int local_frontier_size = frontier.size();
     int global_frontier_size = 0;
     MPI_CHECK(MPI_Allreduce(&local_frontier_size, &global_frontier_size, 1,
                             MPI_INT, MPI_SUM, MPI_COMM_WORLD));
+
+    double term_comm_time = termination_timer.elapsed();
+    perf.comm_time +=
+        term_comm_time;  // Add termination check communication time
 
     done = (global_frontier_size == 0);
 

@@ -39,8 +39,8 @@ __global__ void process_frontier_kernel(
   slice<int> distances,
   slice<const vertex_t> frontier_size,
   slice<vertex_t> next_frontier_size,
-  slice<vertex_t> sent_vertices,
-  slice<int> send_counts,
+  slice<vertex_t> remote_vertices,
+  slice<int> remote_counts,
   int num_vertices,
   int world_rank,
   int world_size,
@@ -53,7 +53,7 @@ __global__ void process_frontier_kernel(
   if (tid == 0) {
     next_frontier_size(0) = 0;
     for (int i = 0; i < world_size; i++) {
-      send_counts(i) = 0;
+      remote_counts(i) = 0;
     }
   }
 
@@ -85,15 +85,14 @@ __global__ void process_frontier_kernel(
           next_frontier(pos) = neighbor;
         }
       } else {
-          // Remote vertex - ADD THIS CHECK
-          vertex_t local_neighbor = neighbor / world_size;
-          
-        if (atomicCAS(&visited(local_neighbor), 0, 1) == 0) {
-            // Only send if this is the first time we've seen it
-            int pos = atomicAdd(&send_counts(owner), 1);
-            if (pos < num_vertices) {
-                sent_vertices(owner * num_vertices + pos) = neighbor;
-            }
+        unsigned int current_count = atomicAdd(&remote_counts(owner), 0);
+        if (current_count < num_vertices) {
+          unsigned int old_count = atomicAdd(&remote_counts(owner), 1);
+          if (old_count < num_vertices) {
+            remote_vertices(owner * num_vertices + old_count) = neighbor;
+          } else {
+            atomicSub(&remote_counts(owner), 1); // Rollback
+          }
         }
       }
     }
@@ -194,33 +193,40 @@ __global__ void sort_by_destination_kernel(
     int stride = blockDim.x * gridDim.x;
 
     for (int rank = 0; rank < world_size; rank++) {
-      int base_offset = send_displs(rank);
-
-      for (int i = tid; i < remote_counts(rank); i += stride) {
+      int dest_offset = send_displs(rank);
+      int count = remote_counts(rank);
+      
+      for (int i = tid; i < count; i += stride) {
         vertex_t v = remote_vertices(rank * num_vertices + i);
-        send_buffer(base_offset + i) = v;
+        send_buffer(dest_offset + i) = v;
       }
     }
-    
 }
 
 __global__ void swap_frontiers_kernel(
     slice<vertex_t> frontier_in, slice<vertex_t> frontier_out,
     slice<vertex_t> size_in, slice<vertex_t> size_out) {
     
-    // Copy size first
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        size_out(0) = size_in(0);
-        size_in(0) = 0;  // Reset next frontier size for next iteration
+    // Store size locally first
+    __shared__ vertex_t frontier_size;
+    
+    if (threadIdx.x == 0) {
+        frontier_size = size_in(0);
+        if (blockIdx.x == 0) {
+            size_out(0) = frontier_size;
+            size_in(0) = 0;  // Reset next frontier size
+        }
     }
     
-    // Copy frontier vertices (use multiple threads)
+    // Make sure all threads in this block see the shared value
+    __syncthreads();
+    
+    // Copy frontier vertices using the locally stored size
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     
-    for (int i = tid; i < size_out(0); i += stride) {
-        if (i < size_in(0)) {
-            frontier_out(i) = frontier_in(i);
-        }
+    for (int i = tid; i < frontier_size; i += stride) {
+        frontier_out(i) = frontier_in(i);
+        frontier_in(i) = 0;
     }
 }

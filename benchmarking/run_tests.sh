@@ -15,8 +15,9 @@
 
 BASE_DIR=${HOME}/school/cuda_nccl_stf_graph_algs
 BUILD_DIR=${BASE_DIR}/temp_build
+GPU_BIN_STF=${BUILD_DIR}/dist_bfs
 GPU_BIN=${BUILD_DIR}/no_stf_dist_bfs
-CPU_BIN=${BUILD_DIR}/cpu_bfs
+CPU_BIN=${BUILD_DIR}/cpu_bfs_no_openmp
 DATA_DIR=${BASE_DIR}/data
 
 # Print environment for debugging
@@ -70,6 +71,7 @@ for DATASET in ${DATA_DIR}/*; do
     # Define explicit output file paths
     CPU_OUT="${OUTPUT_DIR}${DATASET_NAME}_cpu.out"
     GPU_OUT="${OUTPUT_DIR}${DATASET_NAME}_gpu.out"
+    GPU_STF_OUT="${OUTPUT_DIR}${DATASET_NAME}_gpu_stf.out"
     
     # run the CPU BFS
     echo "Running CPU BFS"
@@ -98,6 +100,21 @@ for DATASET in ${DATA_DIR}/*; do
     else
         echo "WARNING: GPU output file was not created"
     fi
+
+    # run the gpu stf BFS
+    echo "Running GPU STF BFS"
+    CMD="srun -n 4 -N 2 --output=${GPU_STF_OUT} ${GPU_BIN_STF} ${SOURCE_V} ${DATASET}"
+    echo "Running command: ${CMD}"
+    eval ${CMD}
+
+    # Check if GPU STF output file was created
+    echo "Checking for GPU STF output file: ${GPU_STF_OUT}"
+    if [ -f "${GPU_STF_OUT}" ]; then
+        echo "GPU STF output file created successfully, size: $(du -h ${GPU_STF_OUT} | cut -f1)"
+    else
+        echo "WARNING: GPU STF output file was not created"
+    fi
+
 done
 
 echo "Benchmark completed. All output files should be in: ${OUTPUT_DIR}"

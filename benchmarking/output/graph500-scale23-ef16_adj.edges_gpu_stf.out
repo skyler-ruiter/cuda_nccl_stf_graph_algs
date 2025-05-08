@@ -1,0 +1,35 @@
+Rank 3: Loaded 1151579 vertices and 64691223 edges in local partition
+Rank 2: Loaded 1151579 vertices and 64188350 edges in local partition
+Using graph file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale23-ef16_adj.edges
+Rank 0: Loaded 1151579 vertices and 64466706 edges in local partition
+Rank 1: Loaded 1151579 vertices and 65155131 edges in local partition
+
+===== BFS Statistics =====
+Source vertex: 8
+Visited vertices: 3449272 (74.88% of graph)
+Maximum distance from source: 8
+Average distance from source: 3.90
+
+Vertices discovered per level:
+Level | Count   | Percent
+---------------------------
+0     | 1       | 0.00%
+1     | 0       | 0.00%
+2     | 149     | 0.00%
+3     | 746369  | 21.64%
+4     | 2347652 | 68.06%
+5     | 307922  | 8.93%
+6     | 45659   | 1.32%
+7     | 1473    | 0.04%
+8     | 47      | 0.00%
+===========================
+
+
+===== BFS Performance =====
+Total execution time: 45.215065 s
+Graph loading/init time: 42.658956 s (94.35%)
+BFS traversal time: 2.847342 s (6.30%)
+Communication time: 0.267565 s (9.40% of BFS time)
+Computation time: 2.579777 s (90.60% of BFS time)
+Number of BFS levels: 8
+Average time per level: 0.355918 s

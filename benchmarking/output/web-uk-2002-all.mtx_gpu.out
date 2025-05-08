@@ -1,0 +1,73 @@
+Using graph file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/web-uk-2002-all.mtx
+Graph statistics: 18520486 rows, 18520486 cols, 298113762 non-zeros
+Rank 3: Loaded 4630087 vertices and 74555709 edges in local partition
+Rank 2: Loaded 4630087 vertices and 74503823 edges in local partition
+Rank 0: Loaded 4630087 vertices and 74497752 edges in local partition
+Rank 1: Loaded 4630087 vertices and 74556478 edges in local partition
+
+===== BFS Statistics =====
+Source vertex: 8
+Visited vertices: 17994090 (97.16% of graph)
+Maximum distance from source: 45
+Average distance from source: 16.72
+
+Vertices discovered per level:
+Level | Count   | Percent
+---------------------------
+0     | 1       | 0.00%
+1     | 7       | 0.00%
+2     | 32      | 0.00%
+3     | 31      | 0.00%
+4     | 44      | 0.00%
+5     | 85      | 0.00%
+6     | 282     | 0.00%
+7     | 1858    | 0.01%
+8     | 4707    | 0.03%
+9     | 40562   | 0.23%
+10    | 108268  | 0.60%
+11    | 285002  | 1.58%
+12    | 703086  | 3.91%
+13    | 1319304 | 7.33%
+14    | 1945724 | 10.81%
+15    | 2460740 | 13.68%
+16    | 2564063 | 14.25%
+17    | 2297901 | 12.77%
+18    | 1822360 | 10.13%
+19    | 1404888 | 7.81%
+20    | 1036242 | 5.76%
+21    | 682518  | 3.79%
+22    | 419565  | 2.33%
+23    | 268533  | 1.49%
+24    | 191099  | 1.06%
+25    | 139087  | 0.77%
+26    | 97607   | 0.54%
+27    | 72019   | 0.40%
+28    | 47088   | 0.26%
+29    | 30784   | 0.17%
+30    | 21248   | 0.12%
+31    | 11589   | 0.06%
+32    | 6505    | 0.04%
+33    | 4405    | 0.02%
+34    | 3218    | 0.02%
+35    | 1356    | 0.01%
+36    | 860     | 0.00%
+37    | 614     | 0.00%
+38    | 194     | 0.00%
+39    | 129     | 0.00%
+40    | 267     | 0.00%
+41    | 114     | 0.00%
+42    | 31      | 0.00%
+43    | 33      | 0.00%
+44    | 27      | 0.00%
+45    | 13      | 0.00%
+===========================
+
+
+===== BFS Performance =====
+Total execution time: 51.753820 s
+Graph loading/init time: 51.468735 s (99.45%)
+BFS traversal time: 2.222700 s (4.29%)
+Communication time: 1.068752 s (48.08% of BFS time)
+Computation time: 1.153948 s (51.92% of BFS time)
+Number of BFS levels: 46
+Average time per level: 0.048320 s

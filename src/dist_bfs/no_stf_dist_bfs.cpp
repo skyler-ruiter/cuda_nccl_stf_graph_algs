@@ -426,7 +426,7 @@ int main(int argc, char* argv[]) {
     // #### SORT VERTICES INTO SEND BUFFER #### //
     if (total_send > 0) {
       sort_by_destination_kernel<<<256, 256, 0, stream>>>(bfs_data.d_remote_vertices,
-        bfs_data.d_remote_counts, d_send_buffer, d_send_counts, d_send_displs, num_vertices,  world_size);
+        bfs_data.d_remote_counts, d_send_buffer, d_send_counts, d_send_displs, num_vertices, world_size);
     }
 
     // #### EXCHANGE SEND BUFFERS OF VERTICES #### //
@@ -483,7 +483,7 @@ int main(int argc, char* argv[]) {
           bfs_data.d_next_frontier, bfs_data.d_next_frontier_size, level,
           num_vertices, world_rank, world_size);
     }
-
+    
     vertex_t h_next_frontier_size = 0;
     CHECK(cudaMemcpyAsync(&h_next_frontier_size, bfs_data.d_next_frontier_size,
                           sizeof(vertex_t), cudaMemcpyDeviceToHost, stream));
@@ -505,6 +505,7 @@ int main(int argc, char* argv[]) {
 
       // Reset the next frontier size for the next iteration
       CHECK(cudaMemsetAsync(bfs_data.d_next_frontier_size, 0, sizeof(vertex_t), stream));
+      CHECK(cudaMemsetAsync(bfs_data.d_next_frontier, 0, num_vertices * sizeof(vertex_t), stream));
     }
 
     // Free only the dynamic buffers

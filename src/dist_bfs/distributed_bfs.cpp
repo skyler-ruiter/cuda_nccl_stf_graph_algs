@@ -307,6 +307,12 @@ int main(int argc, char* argv[]) {
   auto l_total_recv = ctx.logical_data(shape_of<slice<vertex_t>>(1));
   auto l_send_counts = ctx.logical_data(shape_of<slice<int>>(world_size));
 
+  std::vector<int> h_send_counts(world_size, 0);
+  std::vector<int> h_recv_counts(world_size, 0);
+  std::vector<int> h_send_displs(world_size, 0);
+  std::vector<int> h_recv_displs(world_size, 0);
+  std::vector<int> h_all_send_counts(world_size * world_size, 0);
+
   logical_data<slice<vertex_t>> l_send_buffer;
   logical_data<slice<vertex_t>> l_recv_buffer;
   vertex_t total_send = 0; 
@@ -406,37 +412,14 @@ int main(int argc, char* argv[]) {
           perf.level_comm_times.push_back(comm_elapsed);
     };
 
-    // ctx.task(bfs_data.l_remote_counts.read(), l_send_counts.write())
-    //         ->*[&](cudaStream_t s, auto remote_counts, auto send_counts) {
-    //               // Copy the remote_counts to send_counts
-    //               CHECK(cudaMemcpyAsync(
-    //                   send_counts.data_handle(), remote_counts.data_handle(),
-    //                   world_size * sizeof(int), cudaMemcpyDeviceToDevice, s));
-    //             };
+    ctx.task(bfs_data.l_remote_counts.read(), l_send_counts.write())
+      ->*[&](cudaStream_t s, auto remote_counts, auto send_counts) {
+          CHECK(cudaMemcpyAsync(
+              send_counts.data_handle(), remote_counts.data_handle(),
+              world_size * sizeof(int), cudaMemcpyDeviceToDevice, s));
+    };
     
     cudaStreamSynchronize(ctx.task_fence());
-
-    // ctx.host_launch(bfs_data.l_remote_counts.read(), l_all_send_counts.read(), bfs_data.l_next_frontier_size.read())
-    //   ->*[&](auto send_counts, auto all_send_counts, auto next_frontier_size) {
-    //         printf("Rank %d: Local send counts: ", world_rank);
-    //         for (int i = 0; i < world_size; i++) {
-    //           printf("%d ", send_counts(i));
-    //         }
-    //         printf("\n");
-
-    //         printf("Rank %d: All send counts matrix:\n", world_rank);
-    //         for (int i = 0; i < world_size; i++) {
-    //           printf("  Row %d: ", i);
-    //           for (int j = 0; j < world_size; j++) {
-    //             printf("%d ", all_send_counts(i * world_size + j));
-    //           }
-    //           printf("\n");
-    //         }
-
-    //         // print next frontier size
-    //         printf("Rank %d: Next frontier size: %d\n", world_rank,
-    //                 next_frontier_size(0));
-    // };
 
     // calc displacements
     ctx.task(l_all_send_counts.read(), l_recv_counts.rw())
@@ -482,69 +465,34 @@ int main(int argc, char* argv[]) {
             l_send_buffer.rw(), l_send_counts.read(), l_send_displs.read())->*[&]
             (cudaStream_t s, auto remote_vertices, auto remote_counts,
           auto send_buffer, auto send_counts, auto send_displs) {
-        if (total_send > 1) {
+        if (total_send > 0) {
           sort_by_destination_kernel<<<256, 256, 0, s>>>(
               remote_vertices, remote_counts, send_buffer, send_counts,
               send_displs, num_vertices, world_size);
         }
     };
 
-    // host launch to print buffers
-    // ctx.host_launch(l_send_counts.read(), l_recv_counts.read(),
-    //                 l_send_displs.read(), l_recv_displs.read(),
-    //                 l_all_send_counts.rw(), l_send_buffer.rw(),
-    //                 l_recv_buffer.rw())->*[&](auto send_counts, auto recv_counts,
-    //         auto send_displs, auto recv_displs, auto all_send_counts,
-    //         auto send_buffer, auto recv_buffer) {
-    //   // Print buffers
-    //   printf("Rank %d, Level %d: Send Counts: ", world_rank, level);
-    //   for (int i = 0; i < world_size; i++) {
-    //     printf("%d ", send_counts(i));
-    //   }
-    //   printf("\n");
-    //   printf("Rank %d, Level %d: Recv Counts: ", world_rank, level);
-    //   for (int i = 0; i < world_size; i++) {
-    //     printf("%d ", recv_counts(i));
-    //   }
-    //   printf("\n");
-    // };
+    ctx.task(bfs_data.l_remote_counts.rw(), l_recv_counts.rw(), l_send_displs.rw(), l_recv_displs.rw(), l_all_send_counts.rw())->*[&](cudaStream_t s, auto send_counts, auto recv_counts, auto send_displs, auto recv_displs, auto all_send_counts) {
+      CHECK(cudaMemcpy(h_send_counts.data(), send_counts.data_handle(), world_size * sizeof(int), cudaMemcpyDeviceToHost));
+      CHECK(cudaMemcpy(h_recv_counts.data(), recv_counts.data_handle(), world_size * sizeof(int), cudaMemcpyDeviceToHost));
+      CHECK(cudaMemcpy(h_send_displs.data(), send_displs.data_handle(), world_size * sizeof(int), cudaMemcpyDeviceToHost));
+      CHECK(cudaMemcpy(h_recv_displs.data(), recv_displs.data_handle(), world_size * sizeof(int), cudaMemcpyDeviceToHost));
+      CHECK(cudaMemcpy(h_all_send_counts.data(), all_send_counts.data_handle(), world_size * world_size * sizeof(int), cudaMemcpyDeviceToHost));
+    };
 
-    ctx.task(bfs_data.l_remote_counts.rw(), l_recv_counts.rw(), l_send_displs.rw(),
-             l_recv_displs.rw(), l_all_send_counts.rw(), l_send_buffer.rw(),
-             l_recv_buffer.rw())->*[&](cudaStream_t s, auto send_counts,
-            auto recv_counts, auto send_displs, auto recv_displs,
-            auto all_send_counts, auto send_buffer, auto recv_buffer) {
+    cudaStreamSynchronize(ctx.task_fence());
+
+    ctx.host_launch()->*[&]() {
+      for (int i = 0; i < world_size; i++) {
+        h_recv_counts[i] = h_all_send_counts[i * world_size + world_rank];
+      }
+    };
+
+    cudaStreamSynchronize(ctx.task_fence());
+
+    ctx.task(l_send_buffer.rw(), l_recv_buffer.rw())->*[&](cudaStream_t s, auto send_buffer, auto recv_buffer) {
       Timer comm_timer;
       comm_timer.start();
-
-      // Get raw device pointers
-      int* d_send_counts = send_counts.data_handle();
-      int* d_recv_counts = recv_counts.data_handle();
-      int* d_send_displs = send_displs.data_handle();
-      int* d_recv_displs = recv_displs.data_handle();
-
-      // Create host arrays
-      int h_send_counts[world_size];
-      int h_recv_counts[world_size];
-      int h_send_displs[world_size];
-      int h_recv_displs[world_size];
-      int h_temp_all_counts[world_size * world_size];
-
-      CHECK(cudaMemcpy(h_send_counts, d_send_counts, world_size * sizeof(int),
-                       cudaMemcpyDeviceToHost));
-      CHECK(cudaMemcpy(h_recv_counts, d_recv_counts, world_size * sizeof(int),
-                       cudaMemcpyDeviceToHost));
-      CHECK(cudaMemcpy(h_send_displs, d_send_displs, world_size * sizeof(int),
-                       cudaMemcpyDeviceToHost));
-      CHECK(cudaMemcpy(h_recv_displs, d_recv_displs, world_size * sizeof(int),
-                       cudaMemcpyDeviceToHost));
-      CHECK(cudaMemcpy(h_temp_all_counts, all_send_counts.data_handle(),
-                       world_size * world_size * sizeof(int),
-                       cudaMemcpyDeviceToHost));
-
-      for (int i = 0; i < world_size; i++) {
-        h_recv_counts[i] = h_temp_all_counts[i * world_size + world_rank];
-      }
 
       NCCL_CHECK(ncclGroupStart());
       for (int i = 0; i < world_size; i++) {
@@ -572,24 +520,17 @@ int main(int argc, char* argv[]) {
             [&](cudaStream_t s, auto recv_buffer, auto t_recv, auto visited,
             auto distances, auto next_frontier, auto next_frontier_size) 
     {
-      if (total_recv > 1) {
+      if (total_recv > 0) {
         filter_received_vertices_kernel<<<256, 256, 0, s>>>(
             recv_buffer, t_recv, visited, distances, next_frontier,
             next_frontier_size, level, num_vertices, world_rank, world_size);
       }
     };
 
-
     ctx.task(bfs_data.l_next_frontier_size.read())->*[&](cudaStream_t s, auto next_frontier_size) {
       CHECK(cudaMemcpy(&next_f_size,  
                       next_frontier_size.data_handle(),
                       sizeof(vertex_t), cudaMemcpyDeviceToHost));
-    };
-
-    cudaStreamSynchronize(ctx.task_fence());
-
-    ctx.task(bfs_data.l_remote_counts.write())->*[&](cudaStream_t s, auto remote_counts) {
-      CHECK(cudaMemsetAsync(remote_counts.data_handle(), 0, world_size * sizeof(int), s));
     };
 
     ctx.host_launch(bfs_data.l_next_frontier_size.rw(),
@@ -604,26 +545,24 @@ int main(int argc, char* argv[]) {
 
       done = (global_next_frontier_size == 0);
 
+      next_f_size = 0;
+      total_send = 0;
+      total_recv = 0;
+
       if (!done) {
         level++;
       }
     };
 
+    ctx.task(bfs_data.l_frontier.rw(), bfs_data.l_next_frontier.rw(),
+        bfs_data.l_frontier_size.rw(), bfs_data.l_next_frontier_size.rw())
+      ->*[&](cudaStream_t s, auto frontier, auto next_frontier,
+            auto frontier_size, auto next_frontier_size) {
+      swap_frontiers_kernel<<<256, 256, 0, s>>>(
+          next_frontier, frontier, next_frontier_size, frontier_size);
+    };
+
     cudaStreamSynchronize(ctx.task_fence());
-
-    if (!done) {
-      ctx.task(bfs_data.l_frontier.rw(), bfs_data.l_next_frontier.rw(),
-          bfs_data.l_frontier_size.rw(), bfs_data.l_next_frontier_size.rw())
-        ->*[&](cudaStream_t s, auto frontier, auto next_frontier,
-              auto frontier_size, auto next_frontier_size) {
-          swap_frontiers_kernel<<<256, 256, 0, s>>>(
-              next_frontier, frontier, next_frontier_size, frontier_size);
-      };
-
-      ctx.task(bfs_data.l_next_frontier_size.write())->*[&](cudaStream_t s, auto next_frontier_size) {
-        CHECK(cudaMemsetAsync(next_frontier_size.data_handle(), 0, sizeof(vertex_t), s));
-      };
-    }
 
     //* TIMING
     perf.level_times.push_back(level_timer.elapsed());

@@ -30,7 +30,7 @@
 
 * Allocate Nodes: `salloc -A r01156 -p gpu-debug --gpus-per-node 2 --nodes 2 --ntasks-per-node=2`
 
-* Load Modules: `module load PrgEnv-nvidia cudatoolkit/12.2 gcc/12.2 nccl cmake`
+* Load Modules: `module load PrgEnv-nvidia cudatoolkit/12.2 gcc/12.2 nccl cmake python`
 
 * Run Code: `srun -N 2 -n 4 ./mpi_nccl_testing`
 

@@ -1,0 +1,111 @@
+Running on nodes:
+nid0703
+nid0704
+BASE_DIR: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs
+BUILD_DIR: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build
+DATA_DIR: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data
+Data directory contents:
+total 9924800
+drwxr-xr-x  2 sruiter sruiter      32768 May  6 15:23 .
+drwxr-xr-x 13 sruiter sruiter      32768 May  5 20:04 ..
+-rw-r--r--  1 sruiter sruiter   98079268 Apr 29 15:17 graph500-scale18-ef16_adj.edges
+-rw-r--r--  1 sruiter sruiter  204172700 Apr 28 02:39 graph500-scale19-ef16_adj.edges
+-rw-r--r--  1 sruiter sruiter  893744722 Apr 26 21:50 graph500-scale21-ef16_adj.edges
+-rw-r--r--  1 sruiter sruiter 3923918446 Jun  9  2017 graph500-scale23-ef16_adj.edges
+-rw-r--r--  1 sruiter sruiter 5042641836 May  4 14:57 web-uk-2002-all.mtx
+Creating output directory: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/
+Output directory created successfully: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/
+Output directory contents (should be empty):
+total 64
+drwxr-xr-x 2 sruiter sruiter 32768 May  8 14:56 .
+drwxr-xr-x 3 sruiter sruiter 32768 May  8 14:56 ..
+Running BFS on graph500-scale18-ef16_adj.edges
+Full dataset path: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale18-ef16_adj.edges
+Running CPU BFS
+Running command: srun -n 4 -N 2 --gpus-per-task=0 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale18-ef16_adj.edges_cpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/cpu_bfs_no_openmp 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale18-ef16_adj.edges
+Checking for CPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale18-ef16_adj.edges_cpu.out
+CPU output file created successfully, size: 512
+Running GPU BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale18-ef16_adj.edges_gpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/no_stf_dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale18-ef16_adj.edges
+Checking for GPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale18-ef16_adj.edges_gpu.out
+GPU output file created successfully, size: 512
+Running GPU STF BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale18-ef16_adj.edges_gpu_stf.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale18-ef16_adj.edges
+Checking for GPU STF output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale18-ef16_adj.edges_gpu_stf.out
+GPU STF output file created successfully, size: 512
+Running BFS on graph500-scale19-ef16_adj.edges
+Full dataset path: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale19-ef16_adj.edges
+Running CPU BFS
+Running command: srun -n 4 -N 2 --gpus-per-task=0 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale19-ef16_adj.edges_cpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/cpu_bfs_no_openmp 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale19-ef16_adj.edges
+Checking for CPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale19-ef16_adj.edges_cpu.out
+CPU output file created successfully, size: 512
+Running GPU BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale19-ef16_adj.edges_gpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/no_stf_dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale19-ef16_adj.edges
+Checking for GPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale19-ef16_adj.edges_gpu.out
+GPU output file created successfully, size: 512
+Running GPU STF BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale19-ef16_adj.edges_gpu_stf.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale19-ef16_adj.edges
+Checking for GPU STF output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale19-ef16_adj.edges_gpu_stf.out
+GPU STF output file created successfully, size: 512
+Running BFS on graph500-scale21-ef16_adj.edges
+Full dataset path: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale21-ef16_adj.edges
+Running CPU BFS
+Running command: srun -n 4 -N 2 --gpus-per-task=0 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale21-ef16_adj.edges_cpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/cpu_bfs_no_openmp 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale21-ef16_adj.edges
+Checking for CPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale21-ef16_adj.edges_cpu.out
+CPU output file created successfully, size: 512
+Running GPU BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale21-ef16_adj.edges_gpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/no_stf_dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale21-ef16_adj.edges
+Checking for GPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale21-ef16_adj.edges_gpu.out
+GPU output file created successfully, size: 512
+Running GPU STF BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale21-ef16_adj.edges_gpu_stf.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale21-ef16_adj.edges
+Checking for GPU STF output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale21-ef16_adj.edges_gpu_stf.out
+GPU STF output file created successfully, size: 512
+Running BFS on graph500-scale23-ef16_adj.edges
+Full dataset path: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale23-ef16_adj.edges
+Running CPU BFS
+Running command: srun -n 4 -N 2 --gpus-per-task=0 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale23-ef16_adj.edges_cpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/cpu_bfs_no_openmp 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale23-ef16_adj.edges
+Checking for CPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale23-ef16_adj.edges_cpu.out
+CPU output file created successfully, size: 512
+Running GPU BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale23-ef16_adj.edges_gpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/no_stf_dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale23-ef16_adj.edges
+Checking for GPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale23-ef16_adj.edges_gpu.out
+GPU output file created successfully, size: 512
+Running GPU STF BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale23-ef16_adj.edges_gpu_stf.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/graph500-scale23-ef16_adj.edges
+Checking for GPU STF output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/graph500-scale23-ef16_adj.edges_gpu_stf.out
+GPU STF output file created successfully, size: 512
+Running BFS on web-uk-2002-all.mtx
+Full dataset path: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/web-uk-2002-all.mtx
+Running CPU BFS
+Running command: srun -n 4 -N 2 --gpus-per-task=0 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/web-uk-2002-all.mtx_cpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/cpu_bfs_no_openmp 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/web-uk-2002-all.mtx
+Checking for CPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/web-uk-2002-all.mtx_cpu.out
+CPU output file created successfully, size: 512
+Running GPU BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/web-uk-2002-all.mtx_gpu.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/no_stf_dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/web-uk-2002-all.mtx
+Checking for GPU output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/web-uk-2002-all.mtx_gpu.out
+GPU output file created successfully, size: 512
+Running GPU STF BFS
+Running command: srun -n 4 -N 2 --output=/N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/web-uk-2002-all.mtx_gpu_stf.out /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/temp_build/dist_bfs 8 /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/data/web-uk-2002-all.mtx
+Checking for GPU STF output file: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/web-uk-2002-all.mtx_gpu_stf.out
+GPU STF output file created successfully, size: 512
+Benchmark completed. All output files should be in: /N/u/sruiter/BigRed200/school/cuda_nccl_stf_graph_algs/benchmarking/output/20250508_145626/
+Output directory contents:
+total 72
+drwxr-xr-x 2 sruiter sruiter 32768 May  8 15:01 .
+drwxr-xr-x 3 sruiter sruiter 32768 May  8 14:56 ..
+-rw-r--r-- 1 sruiter sruiter   792 May  8 14:56 graph500-scale18-ef16_adj.edges_cpu.out
+-rw-r--r-- 1 sruiter sruiter  1151 May  8 14:56 graph500-scale18-ef16_adj.edges_gpu.out
+-rw-r--r-- 1 sruiter sruiter  1174 May  8 14:56 graph500-scale18-ef16_adj.edges_gpu_stf.out
+-rw-r--r-- 1 sruiter sruiter   792 May  8 14:56 graph500-scale19-ef16_adj.edges_cpu.out
+-rw-r--r-- 1 sruiter sruiter  1173 May  8 14:56 graph500-scale19-ef16_adj.edges_gpu.out
+-rw-r--r-- 1 sruiter sruiter  1198 May  8 14:56 graph500-scale19-ef16_adj.edges_gpu_stf.out
+-rw-r--r-- 1 sruiter sruiter   800 May  8 14:57 graph500-scale21-ef16_adj.edges_cpu.out
+-rw-r--r-- 1 sruiter sruiter  1183 May  8 14:57 graph500-scale21-ef16_adj.edges_gpu.out
+-rw-r--r-- 1 sruiter sruiter  1184 May  8 14:57 graph500-scale21-ef16_adj.edges_gpu_stf.out
+-rw-r--r-- 1 sruiter sruiter   806 May  8 14:58 graph500-scale23-ef16_adj.edges_cpu.out
+-rw-r--r-- 1 sruiter sruiter  1189 May  8 14:58 graph500-scale23-ef16_adj.edges_gpu.out
+-rw-r--r-- 1 sruiter sruiter  1187 May  8 14:59 graph500-scale23-ef16_adj.edges_gpu_stf.out
+-rw-r--r-- 1 sruiter sruiter   878 May  8 15:00 web-uk-2002-all.mtx_cpu.out
+-rw-r--r-- 1 sruiter sruiter  2139 May  8 15:01 web-uk-2002-all.mtx_gpu.out
+-rw-r--r-- 1 sruiter sruiter  2306 May  8 15:02 web-uk-2002-all.mtx_gpu_stf.out

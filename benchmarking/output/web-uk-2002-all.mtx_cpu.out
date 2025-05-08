@@ -1,0 +1,21 @@
+Graph statistics: 18520486 rows, 18520486 cols, 298113762 non-zeros
+Rank 3: Loaded 4630087 vertices and 74555709 edges in local partition
+Rank 1: Loaded 4630087 vertices and 74556478 edges in local partition
+Rank 2: Loaded 4630087 vertices and 74503823 edges in local partition
+Rank 0: Loaded 4630087 vertices and 74497752 edges in local partition
+Starting BFS from source vertex 8 (handled by rank 0)
+
+===== CPU BFS Performance =====
+Total execution time: 36.861911 s
+Graph loading/init time: 34.809826 s (94.43%)
+BFS traversal time: 2.047235 s (5.55%)
+Communication time: 0.101929 s (4.98% of BFS time)
+Computation time: 1.945306 s (95.02% of BFS time)
+Number of BFS levels: 47
+Average time per level: 0.043558 s
+
+===== CPU BFS Statistics =====
+Source vertex: 8
+Visited vertices: 17994090 (97.16% of graph)
+Maximum distance from source: 46
+Average distance from source: 17.47

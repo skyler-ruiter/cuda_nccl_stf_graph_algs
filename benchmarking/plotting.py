@@ -21,10 +21,26 @@ plt.figure(figsize=(12, 6))
 # Extract graph size (using total_edges as the measure)
 df['graph_size'] = df['total_edges']
 
-# Plot for each implementation
+# Create a marker and color mapping for each implementation
+impl_markers = {
+    'CPU': 'o',    # circle
+    'GPU': '^',    # triangle up
+    'GPU_STF': 's' # square
+}
+
+impl_colors = {
+    'CPU': 'blue',
+    'GPU': 'red', 
+    'GPU_STF': 'green'
+}
+
+# Plot for each implementation with consistent colors
 for impl in implementations:
     impl_df = df[df['implementation'] == impl].sort_values('graph_size')
-    plt.plot(impl_df['graph_size'], impl_df['traversal_time'], marker='o', label=impl)
+    plt.plot(impl_df['graph_size'], impl_df['traversal_time'], 
+             marker=impl_markers.get(impl, 'o'),
+             color=impl_colors.get(impl, 'blue'),
+             label=impl)
 
 plt.xlabel('Graph Size (Number of Edges)')
 plt.ylabel('BFS Traversal Time (seconds)')
@@ -43,7 +59,10 @@ plt.figure(figsize=(12, 6))
 # Plot for each implementation
 for impl in implementations:
     impl_df = df[df['implementation'] == impl].sort_values('total_vertices')
-    plt.plot(impl_df['total_vertices'], impl_df['traversal_time'], marker='o', label=impl)
+    plt.plot(impl_df['total_vertices'], impl_df['traversal_time'], 
+             marker=impl_markers.get(impl, 'o'),
+             color=impl_colors.get(impl, 'blue'),
+             label=impl)
 
 plt.xlabel('Graph Size (Number of Vertices)')
 plt.ylabel('BFS Traversal Time (seconds)')
@@ -70,7 +89,8 @@ for impl in implementations:
         s=100,  # marker size
         label=impl,
         alpha=0.7,
-        marker='o' if impl == 'CPU' else '^'  # different markers for CPU vs GPU
+        marker=impl_markers.get(impl, 'o'),  # use specific markers for each implementation
+        color=impl_colors.get(impl, 'blue')  # use specific colors for each implementation
     )
     
     # Add dataset labels to each point
@@ -105,8 +125,8 @@ plt.savefig(os.path.join(PLOT_DIR, 'computation_vs_communication.png'))
 plt.close()
 
 # --------------- Communication to Computation Ratio ---------------
-# Change to a vertical layout with 2 rows, 1 column and make figure taller than wide
-fig, axes = plt.subplots(2, 1, figsize=(8, 10), sharex=True)
+# Create a dynamic vertical layout with as many rows as implementations
+fig, axes = plt.subplots(len(implementations), 1, figsize=(8, 5 * len(implementations)), sharex=True)
 
 # For each implementation
 for i, impl in enumerate(implementations):
@@ -142,15 +162,22 @@ for i, impl in enumerate(implementations):
     
     # Add y-axis label to each subplot
     ax.set_ylabel('Communication/Computation Ratio')
+    
+    # Add x-axis label to each subplot
+    ax.set_xlabel('Dataset')
 
 # Use a subtitle instead of y-axis label
 fig.suptitle('Communication to Computation Ratio (Sorted by Ratio)', fontsize=14)
 
+# Adjust layout to accommodate individual x-axis labels
+plt.subplots_adjust(left=0.15, right=0.85, bottom=0.1, top=0.95, hspace=0.4)
+
+# Remove the common x-axis label since we now have individual ones
+# fig.text(0.5, 0.02, 'Dataset', ha='center', fontsize=12)  # This line should be removed or commented out
+
+# Add a common colorbar
 # Create space for the colorbar by adjusting the figure
 plt.subplots_adjust(left=0.15, right=0.85, bottom=0.22, top=0.9, hspace=0.1)
-
-# Add x-axis label to bottom subplot only, with proper positioning
-fig.text(0.5, 0.1, 'Dataset', ha='center', fontsize=12)
 
 # Add a common colorbar
 norm = plt.Normalize(df['total_vertices'].min(), df['total_vertices'].max())
