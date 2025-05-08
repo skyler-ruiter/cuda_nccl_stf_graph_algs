@@ -126,7 +126,7 @@ plt.close()
 
 # --------------- Communication to Computation Ratio ---------------
 # Create a dynamic vertical layout with as many rows as implementations
-fig, axes = plt.subplots(len(implementations), 1, figsize=(8, 5 * len(implementations)), sharex=True)
+fig, axes = plt.subplots(len(implementations), 1, figsize=(10, 4 * len(implementations)))
 
 # For each implementation
 for i, impl in enumerate(implementations):
@@ -153,31 +153,21 @@ for i, impl in enumerate(implementations):
     x_pos = np.arange(len(impl_df))
     bars = ax.bar(x_pos, impl_df['ratio'], color=colors)
     
-    # Add labels and styling - fix the FixedFormatter warning by properly setting ticks
+    # Add labels and styling - ensure clear dataset names
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(impl_df['dataset'].values, rotation=45, ha='right')
-    ax.set_title(f'{impl} Implementation')
+    ax.set_xticklabels(impl_df['dataset'].values, rotation=45, ha='right', fontsize=9)
+    ax.set_title(f'{impl} Implementation', pad=10)
     ax.axhline(y=1, color='r', linestyle='--', label='Equal ratio')
     ax.grid(True, alpha=0.3)
     
     # Add y-axis label to each subplot
     ax.set_ylabel('Communication/Computation Ratio')
-    
-    # Add x-axis label to each subplot
-    ax.set_xlabel('Dataset')
 
-# Use a subtitle instead of y-axis label
-fig.suptitle('Communication to Computation Ratio (Sorted by Ratio)', fontsize=14)
+# Use a title for the whole figure
+fig.suptitle('Communication to Computation Ratio (Sorted by Ratio)', fontsize=14, y=0.99)
 
-# Adjust layout to accommodate individual x-axis labels
-plt.subplots_adjust(left=0.15, right=0.85, bottom=0.1, top=0.95, hspace=0.4)
-
-# Remove the common x-axis label since we now have individual ones
-# fig.text(0.5, 0.02, 'Dataset', ha='center', fontsize=12)  # This line should be removed or commented out
-
-# Add a common colorbar
-# Create space for the colorbar by adjusting the figure
-plt.subplots_adjust(left=0.15, right=0.85, bottom=0.22, top=0.9, hspace=0.1)
+# Single, unified adjustment for layout with proper spacing - more space below title
+plt.subplots_adjust(left=0.15, right=0.9, bottom=0.15, top=0.92, hspace=0.5)
 
 # Add a common colorbar
 norm = plt.Normalize(df['total_vertices'].min(), df['total_vertices'].max())
@@ -185,7 +175,7 @@ sm = plt.cm.ScalarMappable(cmap='viridis', norm=norm)
 sm.set_array([])
 
 # Position the colorbar properly
-cbar_ax = fig.add_axes([0.15, 0.04, 0.7, 0.02])  # [left, bottom, width, height]
+cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.02])  # [left, bottom, width, height]
 cbar = fig.colorbar(sm, cax=cbar_ax, orientation='horizontal')
 cbar.set_label('Number of Vertices')
 
