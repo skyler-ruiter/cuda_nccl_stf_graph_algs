@@ -100,3 +100,18 @@ target_link_libraries(no_stf_dist_bfs
     CCCL::CCCL
     CCCL::cudax
 )
+
+# #### GRAPH VIS DIST BFS ####
+add_executable(graph_vis_dist_bfs src/dist_bfs/distributed_bfs_graphvis.cpp)
+
+set_source_files_properties(src/dist_bfs/distributed_bfs_graphvis.cpp PROPERTIES LANGUAGE CUDA)
+
+target_link_libraries(graph_vis_dist_bfs 
+    ${MPI_CXX_LIBRARIES}
+    ${CUDA_LIBRARIES}
+    ${NCCL_HOME}/lib/libnccl.so
+    ${CUDA_DRIVER_LIBRARY}
+    cudart
+    CCCL::CCCL
+    CCCL::cudax
+)
