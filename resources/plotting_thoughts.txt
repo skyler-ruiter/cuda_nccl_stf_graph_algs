@@ -1,0 +1,62 @@
+#######################################
+Plotting Conclusions + Paper Outlining:
+#######################################
+
+General Performance Thoughts:
+
+  - CPU generally outperforms GPU by a decent amount on small values, but as we approach very large graphs the GPU starts to outperform the CPU due to massive speed and parallelism.
+
+  - CPU doesn't incraese communication time much as size increases, but GPU has way more communication as graph size increases. 
+
+  - GPU_STF has better communication time than regular GPU and outperforms it generally across the board.
+
+    - could be better optimized for allowing for better overlap of computation and communication, but this is a good start.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+scaling_vertices.png
+
+  - generally stacked as CPU > GPU_STF > GPU
+
+  - cpu outperforms on small values , gpu closes gap as num_vertices increases and STF outperforms on largest dataset
+
+  - tasking generally faster than regular GPU version
+
+scaling_edges.png
+
+  - same as vertices really, minor differences from vertex graph
+
+computation_vs_communication.png
+
+  - CPU has basically no communication time, computation increases generally with graph size (faster than GPU usually)
+
+  - GPU has lot more communication time, scaling up along computation/communication ratio pretty strongly
+
+  - GPU_STF has better communication time than the regular GPU version but i think its because of tasking improvements and more limited scopt of communication testing by difficult to measure tasking overhead
+
+  - smaller graphs have similar scaling to the entire graph, scaling like the larger graphs do to each other
+
+comm_comp_ratio.png
+
+  - CPU has very low ratio, since theres a lot more computation than communication
+
+  - GPU has a lot more communication but varies a lot more with graph size, with scale23 having more computation and scale18 having more communication (by roughly 2x)
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Graph Visualizations:
+
+  - there's a main line of execution to follow, but has some branches that allow for some overlap of computation and communication
+
+  - process frontier and NCCL communication are the two main sources of execution time
+
+    - process frontier is most of the computation time and NCCL is most of the communication time
+
+  - very cool to look at actually, gives a very visual representation of th execution times and how the code is related. 
+
+    - can use the grpah to identify where overalp can/is occuring and where it can be improved
+
+
+
+
