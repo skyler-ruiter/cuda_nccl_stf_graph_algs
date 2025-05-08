@@ -16,6 +16,8 @@
 
 * `tests`: has a few testing files to look at graph analytics and run some basic library testing.
 
+  * there is a file with the 10 highest and lowest vertex degrees for the datasets used in the benchmarking
+
 * `src`: has the implementations of the distributed graph algorithms. 
 
   * `dist_bfs`: has implementations of Breadth First Search (BFS) using MPI, OpenMP+MPI, NCCL+MPI, and CUDASTF+NCCL+MPI. 
@@ -24,7 +26,7 @@
 
 --
 
-* Wrote most of it myself but did us AI for some of the boilerplate and debugging
+* Wrote most of it myself but did use AI for some of the boilerplate and debugging
 
 * tried a lot of methods and failed a lot, but proud of what I was able to implement. 
 
