@@ -76,50 +76,122 @@ plt.savefig(os.path.join(PLOT_DIR, 'scaling_vertices.png'))
 plt.close()
 
 # --------------- Computation vs Communication Times ---------------
-plt.figure(figsize=(10, 8))
+fig, ax = plt.subplots(figsize=(12, 9))
+
+# Store point coordinates for better annotation placement
+point_coords = []
+
+# Function to simplify dataset names for better readability
+def simplify_dataset_name(name):
+    name = name.strip()
+    if 'g500-scale' in name:
+        # Extract scale number and format as 'S##'
+        scale_num = name.split('g500-scale')[1]
+        return f'S{scale_num}'
+    return name  # Return original name for non-g500 datasets like web-uk
 
 # Create a scatter plot of computation vs communication times
 for impl in implementations:
     impl_df = df[df['implementation'] == impl]
     
     # Plot each dataset as a point
-    plt.scatter(
+    points = ax.scatter(
         impl_df['computation_time'], 
         impl_df['communication_time'],
         s=100,  # marker size
         label=impl,
         alpha=0.7,
-        marker=impl_markers.get(impl, 'o'),  # use specific markers for each implementation
-        color=impl_colors.get(impl, 'blue')  # use specific colors for each implementation
+        marker=impl_markers.get(impl, 'o'),
+        color=impl_colors.get(impl, 'blue')
     )
     
-    # Add dataset labels to each point
+    # Store points and dataset info for later annotation with simplified names
     for _, row in impl_df.iterrows():
-        dataset_name = row['dataset'].strip()  # Strip any whitespace
-        plt.annotate(
-            dataset_name,
-            (row['computation_time'], row['communication_time']),
+        point_coords.append({
+            'x': row['computation_time'],
+            'y': row['communication_time'],
+            'dataset': simplify_dataset_name(row['dataset'])
+        })
+
+# Find max value for equal axis scaling and diagonal line
+max_val = max(df['computation_time'].max(), df['communication_time'].max()) * 1.1
+ax.plot([0, max_val], [0, max_val], 'r--', label='Communication = Computation')
+
+# Set up main plot
+ax.set_xlabel('Computation Time (seconds)')
+ax.set_ylabel('Communication Time (seconds)')
+ax.set_title('Computation vs Communication Times by Implementation')
+ax.grid(True, alpha=0.3)
+ax.legend()
+
+# Fix the spacing issue between y-axis and x=0
+ax.axis('scaled')
+ax.set_xlim(0, max_val)
+ax.set_ylim(0, max_val)
+
+# Add an inset axes for the zoomed region
+# First, determine the cluster region bounds
+small_points = [p for p in point_coords if p['x'] < 0.5 and p['y'] < 0.5]
+if small_points:
+    x_min = max(0, min(p['x'] for p in small_points) - 0.05)
+    x_max = max(p['x'] for p in small_points) + 0.05
+    y_min = max(0, min(p['y'] for p in small_points) - 0.05)
+    y_max = max(p['y'] for p in small_points) + 0.05
+    
+    # Create inset axes in the top left corner instead of bottom right
+    axins = ax.inset_axes([0.07, 0.55, 0.4, 0.4])
+    
+    # Plot the same data in the inset
+    for impl in implementations:
+        impl_df = df[df['implementation'] == impl]
+        axins.scatter(
+            impl_df['computation_time'], 
+            impl_df['communication_time'],
+            s=80,
+            label=impl,
+            alpha=0.7,
+            marker=impl_markers.get(impl, 'o'),
+            color=impl_colors.get(impl, 'blue')
+        )
+    
+    # Add annotations in the inset with better spacing
+    for i, point in enumerate(small_points):
+        # Calculate text offsets to avoid overlap
+        offset_x = 0.01 * (i % 3)  # Vary x offset based on point index
+        offset_y = 0.01 * (i % 5)  # Vary y offset based on point index
+        
+        axins.annotate(
+            point['dataset'],
+            (point['x'], point['y']),
+            xytext=(5 + offset_x*30, 5 + offset_y*30),
+            textcoords='offset points',
+            fontsize=8,
+            arrowprops=dict(arrowstyle='->', lw=0.5)
+        )
+    
+    # Set the limits for the inset axes
+    axins.set_xlim(x_min, x_max)
+    axins.set_ylim(y_min, y_max)
+    axins.grid(True, alpha=0.3)
+    
+    # Draw lines connecting the zoomed region with the inset
+    ax.indicate_inset_zoom(axins, edgecolor="black")
+    
+    # Add diagonal line in the inset
+    axins.plot([x_min, x_max], [x_min, x_max], 'r--')
+
+# Add annotations to the main plot for non-clustered points
+for point in point_coords:
+    # Only annotate points outside the zoomed region
+    if small_points and (point['x'] > x_max or point['y'] > y_max):
+        ax.annotate(
+            point['dataset'],
+            (point['x'], point['y']),
             xytext=(5, 5),
             textcoords='offset points',
             fontsize=8
         )
 
-# Find max value for equal axis scaling and diagonal line
-max_val = max(df['computation_time'].max(), df['communication_time'].max()) * 1.1
-plt.plot([0, max_val], [0, max_val], 'r--', label='Communication = Computation')
-
-plt.xlabel('Computation Time (seconds)')
-plt.ylabel('Communication Time (seconds)')
-plt.title('Computation vs Communication Times by Implementation')
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-# Fix the spacing issue between y-axis and x=0
-plt.axis('scaled')  # Use 'scaled' instead of 'equal'
-plt.xlim(0, max_val)
-plt.ylim(0, max_val)
-
-# Add a tight_layout with appropriate padding
 plt.tight_layout(pad=1.1)
 plt.savefig(os.path.join(PLOT_DIR, 'computation_vs_communication.png'))
 plt.close()
