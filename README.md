@@ -6,6 +6,10 @@
 
 ---
 
+## **Dr. Swany** --> Look for report in home directory as CSCI_P434_REPORT.pdf
+
+---
+
 ### Codebase Notes:
 
 * `benchmarking/`: has output from benchmarking (look for more details about runtime info), scripts for running tests and manipuating data, and output plots. 
